@@ -1538,7 +1538,7 @@ function renderClassAverageHeartZoneBar(date, hrMaxRef) {
   const caption = HR_ZONE_DEFS.slice().reverse().map(z => `<span class="zone-caption-item"><i style="--c:${z.color}"></i>${z.level}: ${z.name}</span>`).join("");
   return `
     <div class="zone-block average-zone-block">
-      <div class="zone-head"><span>心拍ゾーン滞在割合の全ID平均</span></div>
+      <div class="zone-head"><span>全ID平均の心拍ゾーン滞在割合</span></div>
       <div class="zone-rows" aria-label="心拍ゾーン滞在割合の全ID平均">${rows}</div>
       <div class="zone-caption">${caption}</div>
     </div>`;
@@ -1551,13 +1551,13 @@ function renderHeartZoneBar(hrValues, hrMaxRef) {
     <div class="zone-row">
       <div class="zone-level" style="--c:${z.color}">${z.level}</div>
       <div class="zone-track"><div class="zone-fill" style="--c:${z.color};width:${Math.max(0, z.pct)}%"></div></div>
-      <div class="zone-time">${formatDuration(z.seconds)}</div>
+      <div class="zone-time">${z.pct.toFixed(1)}%</div>
     </div>`).join("");
   const caption = HR_ZONE_DEFS.slice().reverse().map(z => `<span class="zone-caption-item"><i style="--c:${z.color}"></i>${z.level}: ${z.name}</span>`).join("");
   return `
     <div class="zone-block">
-      <div class="zone-head"><span>心拍ゾーン滞在時間</span></div>
-      <div class="zone-rows" aria-label="心拍ゾーン滞在時間">${rows}</div>
+      <div class="zone-head"><span>選択IDの心拍ゾーン滞在割合</span></div>
+      <div class="zone-rows" aria-label="選択IDの心拍ゾーン滞在割合">${rows}</div>
       <div class="zone-caption">${caption}</div>
     </div>`;
 }

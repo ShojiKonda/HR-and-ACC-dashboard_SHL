@@ -707,3 +707,37 @@ canvas,
     padding-top: 0 !important;
   }
 }
+
+
+/* 2026-06 update: align selected-ID and class-average zone blocks and show both as percentages. */
+.heart-kpi .zone-head span:first-child,
+.class-zone-kpi .zone-head span:first-child {
+  font-size: 17px;
+  line-height: 1.25;
+}
+.heart-kpi .zone-time,
+.class-zone-kpi .zone-time {
+  min-width: 92px;
+  font-size: 18px;
+  text-align: right;
+}
+.class-zone-kpi {
+  padding-top: 154px !important;
+}
+.class-zone-kpi .zone-block,
+.heart-kpi .zone-block {
+  margin-top: 0 !important;
+}
+.class-zone-kpi .zone-head,
+.heart-kpi .zone-head {
+  min-height: 44px;
+  margin-bottom: 18px;
+}
+.zone-row {
+  grid-template-columns: 54px minmax(180px, 1fr) 104px;
+}
+@media (max-width: 1050px) {
+  .class-zone-kpi {
+    padding-top: 0 !important;
+  }
+}
