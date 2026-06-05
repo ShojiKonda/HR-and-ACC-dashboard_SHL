@@ -229,7 +229,7 @@ canvas {
 .histogram-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(300px, 1fr));
-  gap: 16px;
+  gap: 22px;
   min-width: 960px;
 }
 .histogram-card {
@@ -238,7 +238,10 @@ canvas {
   padding: 14px;
   background: rgba(15, 23, 42, 0.36);
 }
-.histogram-card canvas { border-radius: 10px; }
+.histogram-card canvas {
+  border-radius: 10px;
+  min-height: 240px;
+}
 
 .trend-legend {
   display: flex;
