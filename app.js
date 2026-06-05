@@ -1538,7 +1538,7 @@ function renderClassAverageHeartZoneBar(date, hrMaxRef) {
   const caption = HR_ZONE_DEFS.slice().reverse().map(z => `<span class="zone-caption-item"><i style="--c:${z.color}"></i>${z.level}: ${z.name}</span>`).join("");
   return `
     <div class="zone-block average-zone-block">
-      <div class="zone-head"><span>心拍ゾーン滞在割合の全ID平均</span><span>各IDの割合を平均 / n=${subjectCount}</span></div>
+      <div class="zone-head"><span>心拍ゾーン滞在割合の全ID平均</span></div>
       <div class="zone-rows" aria-label="心拍ゾーン滞在割合の全ID平均">${rows}</div>
       <div class="zone-caption">${caption}</div>
     </div>`;
@@ -1556,7 +1556,7 @@ function renderHeartZoneBar(hrValues, hrMaxRef) {
   const caption = HR_ZONE_DEFS.slice().reverse().map(z => `<span class="zone-caption-item"><i style="--c:${z.color}"></i>${z.level}: ${z.name}</span>`).join("");
   return `
     <div class="zone-block">
-      <div class="zone-head"><span>心拍ゾーン滞在時間</span><span>Polar 5 zones / HRmax 200 bpm固定</span></div>
+      <div class="zone-head"><span>心拍ゾーン滞在時間</span></div>
       <div class="zone-rows" aria-label="心拍ゾーン滞在時間">${rows}</div>
       <div class="zone-caption">${caption}</div>
     </div>`;
@@ -1882,7 +1882,6 @@ function renderKpis() {
     </article>
     <article class="kpi class-zone-kpi">
       ${renderClassAverageHeartZoneBar(state.selectedDate, 200)}
-      <p class="sub class-zone-note">平均波形ではなく、各IDのゾーン滞在割合を先に算出し、その割合を全IDで平均しています。</p>
     </article>`;
 }
 

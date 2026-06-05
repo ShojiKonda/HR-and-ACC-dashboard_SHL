@@ -662,3 +662,48 @@ canvas,
   .zone-track { height: 36px; }
   .zone-time { font-size: 15px; }
 }
+
+
+/* 2026-06 update: remove small explanatory notes and align zone panels. */
+.lead,
+.section-title p,
+.panel-note,
+.sub,
+.status .note,
+.hero-card small,
+.zone-head span:last-child {
+  display: none !important;
+}
+
+.section-title,
+.panel-head {
+  margin-bottom: 18px;
+}
+
+.kpis {
+  align-items: stretch !important;
+}
+.kpi {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.heart-kpi .zone-block {
+  margin-top: 22px;
+}
+.class-zone-kpi {
+  padding-top: 114px !important;
+}
+.class-zone-kpi .zone-block {
+  margin-top: 0 !important;
+}
+.zone-head {
+  justify-content: flex-start;
+  min-height: 26px;
+}
+
+@media (max-width: 1050px) {
+  .class-zone-kpi {
+    padding-top: 0 !important;
+  }
+}
