@@ -7,15 +7,12 @@ const state = {
 };
 
 const CONFIG = {
+  repoFullName: 'ShojiKonda/HR-and-ACC-dashboard_SHL',
+  branch: 'main',
+  dataFolder: 'data/2026_05_25',
   displayStartSecond: 11 * 3600 + 10 * 60,
   displayEndSecond: 11 * 3600 + 50 * 60,
   defaultDate: '2026-05-25',
-  defaultFiles: [
-    'data/hr_acc_index_per_second_2026-05-25.csv',
-    'data/hr_acc_index_per_minute_2026-05-25.csv',
-    'data/hr_acc_index_per_second.csv',
-    'data/hr_acc_index_per_minute.csv',
-  ],
 };
 
 const COLORS = {
@@ -107,8 +104,8 @@ function headerIndex(rows) {
   return rows.findIndex((row) => {
     const lower = row.map((x) => String(x).trim().toLowerCase());
     return lower.includes('sensorid') &&
-      (lower.includes('timestamp') || lower.includes('minute')) &&
-      (lower.includes('heartrate_bpm') || lower.includes('meanheartrate_bpm'));
+      (lower.includes('timestamp') || lower.includes('minute') || lower.includes('time')) &&
+      (lower.includes('heartrate_bpm') || lower.includes('meanheartrate_bpm') || lower.includes('heartrate') || lower.includes('hr'));
   });
 }
 
@@ -436,10 +433,10 @@ function drawHover(ctx, box, axis, selectedSeries, classSeries) {
   ctx.setLineDash([]);
 
   const rows = [];
-  if (selected) rows.push({ label: `選択ID ${state.selectedId}`, value: `${fmtNumber(selected.value, 1)} bpm`, color: COLORS.orange, second: selected.second });
-  if (average) rows.push({ label: '全員平均', value: `${fmtNumber(average.value, 1)} bpm`, color: COLORS.classLine, second: average.second });
+  if (selected) rows.push({ label: `選択ID ${state.selectedId}`, value: selected.value, text: `${fmtNumber(selected.value, 1)} bpm`, color: COLORS.orange, second: selected.second });
+  if (average) rows.push({ label: '全員平均', value: average.value, text: `${fmtNumber(average.value, 1)} bpm`, color: COLORS.classLine, second: average.second });
   rows.forEach((row) => {
-    const yPoint = pointToCanvas({ second: row.second, value: parseNumber(row.value) }, box, axis);
+    const yPoint = pointToCanvas({ second: row.second, value: row.value }, box, axis);
     ctx.fillStyle = row.color;
     ctx.beginPath();
     ctx.arc(yPoint.x, yPoint.y, 4.5, 0, Math.PI * 2);
@@ -448,7 +445,7 @@ function drawHover(ctx, box, axis, selectedSeries, classSeries) {
 
   const labelTime = secondToLabel(Math.round(second), true);
   ctx.font = chartFont(800, 14);
-  const textWidth = Math.max(...rows.map((r) => ctx.measureText(`${r.label}: ${r.value}`).width), ctx.measureText(labelTime).width);
+  const textWidth = Math.max(...rows.map((r) => ctx.measureText(`${r.label}: ${r.text}`).width), ctx.measureText(labelTime).width);
   const cardW = textWidth + 34;
   const cardH = 34 + rows.length * 24;
   const cardX = Math.min(box.right - cardW - 8, Math.max(box.left + 8, guideX + 12));
@@ -470,7 +467,7 @@ function drawHover(ctx, box, axis, selectedSeries, classSeries) {
     ctx.fillRect(cardX + 16, y - 9, 18, 4);
     ctx.fillStyle = COLORS.ink;
     ctx.font = chartFont(800, 14);
-    ctx.fillText(`${r.label}: ${r.value}`, cardX + 42, y - 3);
+    ctx.fillText(`${r.label}: ${r.text}`, cardX + 42, y - 3);
   });
   ctx.restore();
 }
@@ -551,28 +548,84 @@ async function loadCsvText(text, fileName) {
   drawChart();
 }
 
-async function tryLoadDefaultFiles() {
-  for (const path of CONFIG.defaultFiles) {
-    try {
-      const text = await fetchText(path);
-      await loadCsvText(text, path);
-      return;
-    } catch (e) {}
-  }
+async function listCsvFilesInDataFolder() {
+  const apiUrl = `https://api.github.com/repos/${CONFIG.repoFullName}/contents/${CONFIG.dataFolder}?ref=${CONFIG.branch}`;
+  const res = await fetch(apiUrl, {
+    cache: 'no-store',
+    headers: { Accept: 'application/vnd.github+json' },
+  });
+  if (!res.ok) throw new Error(`Cannot list ${CONFIG.dataFolder}`);
+
+  const items = await res.json();
+  if (!Array.isArray(items)) throw new Error(`${CONFIG.dataFolder} の一覧を取得できません。`);
+
+  return items
+    .filter((item) => item.type === 'file')
+    .filter((item) => /\.csv$/i.test(item.name))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ja'))
+    .map((item) => ({
+      name: item.name,
+      url: item.download_url || `https://raw.githubusercontent.com/${CONFIG.repoFullName}/${CONFIG.branch}/${item.path}`,
+    }));
+}
+
+async function loadCsvEntries(entries, sourceLabel) {
+  state.rows = [];
+  state.fileName = sourceLabel;
+  state.hover = null;
+  el('restingFileName').textContent = `${sourceLabel} を読み込み中...`;
   drawChart();
+
+  const allRows = [];
+  const loadedNames = [];
+  const failedNames = [];
+
+  for (const entry of entries) {
+    try {
+      const text = entry.file ? await readTextFile(entry.file) : await fetchText(entry.url);
+      const parsed = parseHeartRateCsv(text, entry.name || entry.url);
+      allRows.push(...parsed);
+      loadedNames.push(entry.name || entry.url);
+    } catch (err) {
+      failedNames.push(`${entry.name || entry.url}: ${err.message || String(err)}`);
+    }
+  }
+
+  state.rows = allRows;
+  state.fileName = `${sourceLabel}: ${loadedNames.length} CSV`;
+  state.hover = null;
+  el('restingFileName').textContent = failedNames.length
+    ? `${state.fileName} 読込 / 失敗 ${failedNames.length} CSV`
+    : `${state.fileName} 読込完了`;
+
+  if (failedNames.length) console.warn('CSV load failures:', failedNames);
+  updateIdSelect();
+  drawChart();
+}
+
+async function tryLoadDefaultFiles() {
+  try {
+    el('restingFileName').textContent = `${CONFIG.dataFolder} のCSV一覧を取得中...`;
+    const entries = await listCsvFilesInDataFolder();
+    if (!entries.length) {
+      el('restingFileName').textContent = `${CONFIG.dataFolder} にCSVファイルがありません。`;
+      drawChart();
+      return;
+    }
+    await loadCsvEntries(entries, `${CONFIG.dataFolder} 内の全CSV`);
+  } catch (err) {
+    console.error(err);
+    el('restingFileName').textContent = `${CONFIG.dataFolder} の自動読込に失敗しました。手動でCSVを複数選択してください。`;
+    drawChart();
+  }
 }
 
 function setupEvents() {
   const input = el('restingInput');
   input.addEventListener('change', async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await readTextFile(file);
-      await loadCsvText(text, file.name);
-    } catch (err) {
-      alert(err.message || String(err));
-    }
+    const files = [...(event.target.files || [])].filter((file) => /\.csv$/i.test(file.name));
+    if (!files.length) return;
+    await loadCsvEntries(files.map((file) => ({ name: file.name, file })), '手動選択CSV');
   });
 
   const drop = el('restingDrop');
@@ -585,14 +638,9 @@ function setupEvents() {
     drop.classList.remove('dragover');
   }));
   drop.addEventListener('drop', async (e) => {
-    const file = e.dataTransfer?.files?.[0];
-    if (!file) return;
-    try {
-      const text = await readTextFile(file);
-      await loadCsvText(text, file.name);
-    } catch (err) {
-      alert(err.message || String(err));
-    }
+    const files = [...(e.dataTransfer?.files || [])].filter((file) => /\.csv$/i.test(file.name));
+    if (!files.length) return;
+    await loadCsvEntries(files.map((file) => ({ name: file.name, file })), 'ドラッグ＆ドロップCSV');
   });
 
   el('idSelect').addEventListener('change', (e) => {

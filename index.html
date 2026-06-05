@@ -11,7 +11,7 @@
       <div class="hero-copy">
         <p class="eyebrow">HR ACC Dashboard v2</p>
         <h1>安静時心拍数</h1>
-        <p class="lead">5月25日の心拍データを読み込み、11:10〜11:50の時系列をID別に表示します。選択IDの心拍数に加えて、同時刻における全員平均を重ねて表示します。</p>
+        <p class="lead">5月25日の心拍データを読み込み、11:10〜11:50の時系列をID別に表示します。data/2026_05_25内のCSV全ファイルを対象に、選択IDの心拍数と全員平均を重ねて表示します。</p>
       </div>
       <aside class="hero-card">
         <strong><span class="status-dot"></span>Tab 1</strong>
@@ -29,15 +29,15 @@
           <span>1</span>
           <div>
             <h2>5月25日のデータを読み込む</h2>
-            <p>対応形式：<code>SensorID, Timestamp, HeartRate_bpm</code> または <code>SensorID, Minute, MeanHeartRate_bpm</code> を含むCSV。</p>
+            <p><code>data/2026_05_25/</code> 内のCSV全ファイルを自動読込します。対応形式：<code>SensorID, Timestamp, HeartRate</code> を含むCSV。</p>
           </div>
         </div>
         <div class="drop-grid two">
           <label class="drop-zone" id="restingDrop">
-            <input id="restingInput" type="file" accept=".csv,text/csv" />
+            <input id="restingInput" type="file" accept=".csv,text/csv" multiple />
             <strong>心拍CSVを選択</strong>
-            <small>例：hr_acc_index_per_second.csv / hr_acc_index_per_minute.csv</small>
-            <span id="restingFileName">data/hr_acc_index_per_second_2026-05-25.csv を自動読込予定</span>
+            <small>自動読込に失敗した場合は、フォルダ内のCSVを複数選択してください</small>
+            <span id="restingFileName">data/2026_05_25/ 内のCSV全ファイルを自動読込予定</span>
           </label>
           <div class="info-box">
             <strong>表示条件</strong>
