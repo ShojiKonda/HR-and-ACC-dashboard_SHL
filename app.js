@@ -2278,8 +2278,19 @@ function scatter(canvas, config) {
   }
   ctx.fillStyle = MUTED; ctx.font = fnt(800, 12); ctx.fillText("平均加速度ノルム", (plot.l + plot.r) / 2, height - 14);
   ctx.save(); ctx.translate(18, (plot.t + plot.b) / 2); ctx.rotate(-Math.PI / 2); ctx.fillText("平均心拍数 bpm", 0, 0); ctx.restore();
-  ctx.save(); ctx.globalAlpha = 0.22;
-  for (const p of pts) { ctx.fillStyle = dateColor(p.date); ctx.beginPath(); ctx.arc(sx(p.avgAcc), sy(p.avgHr), 3.8, 0, Math.PI * 2); ctx.fill(); }
+  ctx.save();
+  ctx.globalAlpha = 0.58;
+  for (const p of pts) {
+    const x = sx(p.avgAcc);
+    const y = sy(p.avgHr);
+    ctx.fillStyle = dateColor(p.date);
+    ctx.beginPath();
+    ctx.arc(x, y, 5.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.34)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
   ctx.restore();
   const legendDates = dates();
   let lx = Math.max(plot.l + 8, plot.r - 178), ly = plot.t + 12;
