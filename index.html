@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HR ACC Dashboard v2 | Resting Heart Rate</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">HR ACC Dashboard v2</p>
+        <h1>安静時心拍数</h1>
+        <p class="lead">5月25日の心拍データを読み込み、11:10〜11:50の時系列をID別に表示します。選択IDの心拍数に加えて、同時刻における全員平均を重ねて表示します。</p>
+      </div>
+      <aside class="hero-card">
+        <strong><span class="status-dot"></span>Tab 1</strong>
+        <small>Resting heart rate time series</small>
+      </aside>
+    </header>
+
+    <nav class="tab-nav" aria-label="dashboard tabs">
+      <button class="tab-button active" type="button">タブ1：安静時心拍数</button>
+    </nav>
+
+    <main class="layout">
+      <section class="panel upload-panel" id="upload">
+        <div class="section-title">
+          <span>1</span>
+          <div>
+            <h2>5月25日のデータを読み込む</h2>
+            <p>対応形式：<code>SensorID, Timestamp, HeartRate_bpm</code> または <code>SensorID, Minute, MeanHeartRate_bpm</code> を含むCSV。</p>
+          </div>
+        </div>
+        <div class="drop-grid two">
+          <label class="drop-zone" id="restingDrop">
+            <input id="restingInput" type="file" accept=".csv,text/csv" />
+            <strong>心拍CSVを選択</strong>
+            <small>例：hr_acc_index_per_second.csv / hr_acc_index_per_minute.csv</small>
+            <span id="restingFileName">data/hr_acc_index_per_second_2026-05-25.csv を自動読込予定</span>
+          </label>
+          <div class="info-box">
+            <strong>表示条件</strong>
+            <dl>
+              <div><dt>対象日</dt><dd><input id="dateInput" class="date-input" type="date" value="2026-05-25" /></dd></div>
+              <div><dt>時刻</dt><dd>11:10〜11:50</dd></div>
+              <div><dt>表示</dt><dd>選択ID + 全員平均</dd></div>
+            </dl>
+          </div>
+        </div>
+      </section>
+
+      <section class="dashboard-grid four">
+        <article class="stat-card">
+          <span class="card-label">読み込みID数</span>
+          <strong id="idCount">0</strong>
+          <small id="idCountNote">データ未読込</small>
+        </article>
+        <article class="stat-card">
+          <span class="card-label">選択ID</span>
+          <strong id="selectedIdCard">-</strong>
+          <small id="selectedIdNote">IDを選択してください</small>
+        </article>
+        <article class="stat-card">
+          <span class="card-label">選択ID 平均心拍数</span>
+          <strong id="selectedMeanHr">-</strong>
+          <small>11:10〜11:50</small>
+        </article>
+        <article class="stat-card">
+          <span class="card-label">全員平均心拍数</span>
+          <strong id="classMeanHr">-</strong>
+          <small>同時刻データから算出</small>
+        </article>
+      </section>
+
+      <section class="panel chart-panel" id="resting-timeseries">
+        <div class="section-title">
+          <span>2</span>
+          <div>
+            <h2>安静時心拍数の時系列</h2>
+            <p>選択したIDの心拍数と、全員の平均心拍数を同じ時間軸で表示します。</p>
+          </div>
+        </div>
+        <div class="control-row compact-controls">
+          <label>ID選択
+            <select id="idSelect" disabled>
+              <option value="">CSVを読み込んでください</option>
+            </select>
+          </label>
+          <label>表示範囲
+            <select id="rangeSelect" disabled>
+              <option>11:10〜11:50</option>
+            </select>
+          </label>
+        </div>
+        <div class="legend" id="restingLegend">
+          <span><i class="line selected-line"></i>選択ID</span>
+          <span><i class="line class-line"></i>全員平均</span>
+          <span id="dataStatus">データ未読込</span>
+        </div>
+        <canvas id="restingCanvas" width="1180" height="540" aria-label="resting heart rate time series"></canvas>
+      </section>
+    </main>
+
+    <footer>
+      <small>HR ACC Dashboard v2 / Tab 1 prototype</small>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>
