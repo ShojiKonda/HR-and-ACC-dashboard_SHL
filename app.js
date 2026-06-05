@@ -1502,6 +1502,47 @@ function heartZoneSummary(hrValues, hrMaxRef) {
   }
   return zones;
 }
+
+function averageHeartZonePercentagesForDate(date, hrMaxRef) {
+  const zones = HR_ZONE_DEFS.map(z => ({ ...z, pct: 0, seconds: 0, count: 0 }));
+  const group = state.measurements.filter(m => m.date === date);
+  let subjectCount = 0;
+
+  for (const m of group) {
+    const values = finiteMetricValues(m, "hr");
+    if (!values.length) continue;
+    const subjectZones = heartZoneSummary(values, hrMaxRef);
+    subjectZones.forEach((z, i) => {
+      zones[i].pct += z.pct;
+    });
+    subjectCount += 1;
+  }
+
+  if (!subjectCount) return { zones, subjectCount };
+  zones.forEach(z => {
+    z.pct = z.pct / subjectCount;
+  });
+  return { zones, subjectCount };
+}
+
+function renderClassAverageHeartZoneBar(date, hrMaxRef) {
+  const { zones, subjectCount } = averageHeartZonePercentagesForDate(date, hrMaxRef);
+  if (!subjectCount) return '<div class="zone-empty">表示範囲内に心拍データがあるIDがありません。</div>';
+
+  const rows = zones.slice().reverse().map(z => `
+    <div class="zone-row">
+      <div class="zone-level" style="--c:${z.color}">${z.level}</div>
+      <div class="zone-track"><div class="zone-fill" style="--c:${z.color};width:${Math.max(0, z.pct)}%"></div></div>
+      <div class="zone-time">${z.pct.toFixed(1)}%</div>
+    </div>`).join("");
+  const caption = HR_ZONE_DEFS.slice().reverse().map(z => `<span class="zone-caption-item"><i style="--c:${z.color}"></i>${z.level}: ${z.name}</span>`).join("");
+  return `
+    <div class="zone-block average-zone-block">
+      <div class="zone-head"><span>心拍ゾーン滞在割合の全ID平均</span><span>各IDの割合を平均 / n=${subjectCount}</span></div>
+      <div class="zone-rows" aria-label="心拍ゾーン滞在割合の全ID平均">${rows}</div>
+      <div class="zone-caption">${caption}</div>
+    </div>`;
+}
 function renderHeartZoneBar(hrValues, hrMaxRef) {
   const zones = heartZoneSummary(hrValues, hrMaxRef).slice().reverse();
   const totalInZones = zones.reduce((sum, z) => sum + z.count, 0);
@@ -1822,10 +1863,8 @@ function renderKpis() {
     return;
   }
   const hrValues = finiteMetricValues(m, "hr");
-  const accValues = finiteMetricValues(m, "acc");
   const avgHr = mean(hrValues);
   const maxHr = safeMax(hrValues, NaN);
-  const avgAcc = mean(accValues);
   el.innerHTML = `
     <article class="kpi heart-kpi">
       <p class="klabel">心拍数</p>
@@ -1841,11 +1880,9 @@ function renderKpis() {
       </div>
       ${renderHeartZoneBar(hrValues, 200)}
     </article>
-    <article class="kpi acc-kpi">
-      <p class="klabel">加速度ノルム</p>
-      <p class="metric-label">平均加速度ノルム</p>
-      <p class="metric-value">${formatNumber(avgAcc, 3)}<span class="unit">g</span></p>
-      <p class="sub">選択IDの表示範囲内平均値です。</p>
+    <article class="kpi class-zone-kpi">
+      ${renderClassAverageHeartZoneBar(state.selectedDate, 200)}
+      <p class="sub class-zone-note">平均波形ではなく、各IDのゾーン滞在割合を先に算出し、その割合を全IDで平均しています。</p>
     </article>`;
 }
 
