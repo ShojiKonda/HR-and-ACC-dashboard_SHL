@@ -14,7 +14,7 @@ const CONFIG = {
   defaultDate: '2026-05-25',
   displayStartSecond: 11 * 3600 + 20 * 60,
   displayEndSecond: 11 * 3600 + 45 * 60,
-  histogramBinWidth: 2,
+  histogramBinWidth: 5,
   summaryWindows: [
     { key: 'standHr', canvasId: 'standHistogramCanvas', label: '立位', timeLabel: '11:32〜11:33', start: 11 * 3600 + 32 * 60, end: 11 * 3600 + 33 * 60 },
     { key: 'sitHr', canvasId: 'sitHistogramCanvas', label: '座位', timeLabel: '11:34〜11:35', start: 11 * 3600 + 34 * 60, end: 11 * 3600 + 35 * 60 },
