@@ -21,6 +21,7 @@
     <nav class="tabs main-tabs" aria-label="dashboard tabs">
       <button class="dashboard-tab active" type="button" data-tab-target="resting-tab">安静時心拍数</button>
       <button class="dashboard-tab" type="button" data-tab-target="exercise-tab">運動時心拍数</button>
+      <button class="dashboard-tab" type="button" data-tab-target="intensity-tab">運動強度分析</button>
     </nav>
 
     <main class="layout">
@@ -178,6 +179,52 @@
           <div id="compareClassLegend"></div>
           <canvas id="compareScatterChart"></canvas>
         </div>
+      </section>
+
+
+      <section id="intensity-tab" class="tab-panel" hidden>
+        <section class="panel intensity-panel" id="intensity-baseline-panel">
+          <div class="panel-head">
+            <div>
+              <div class="title"><span class="badge">01</span><h2 class="heading">基準心拍数と運動時心拍数</h2></div>
+            </div>
+          </div>
+          <div class="controls intensity-controls">
+            <div class="group"><label for="intensityDateSelect">計測日</label><select id="intensityDateSelect"></select></div>
+            <div class="group"><label for="intensitySensorSelect">センサID</label><select id="intensitySensorSelect"></select></div>
+            <div class="group"><label for="intensityTimeStartSelect">表示開始時刻</label><select id="intensityTimeStartSelect" class="time-start intensity-time-start"></select></div>
+            <div class="group"><label for="intensityTimeEndSelect">表示終了時刻</label><select id="intensityTimeEndSelect" class="time-end intensity-time-end"></select></div>
+          </div>
+          <div class="intensity-metric-grid" id="intensityBaselineGrid"></div>
+        </section>
+
+        <section class="panel intensity-panel" id="intensity-method-panel">
+          <div class="panel-head">
+            <div>
+              <div class="title"><span class="badge">02</span><h2 class="heading">%HRmax法と%HRR法の比較</h2></div>
+            </div>
+          </div>
+          <div class="method-compare-grid" id="intensityMethodCompareGrid"></div>
+        </section>
+
+        <section class="panel intensity-panel" id="intensity-zone-panel">
+          <div class="panel-head">
+            <div>
+              <div class="title"><span class="badge">03</span><h2 class="heading">心拍ゾーン滞在割合の比較</h2></div>
+            </div>
+          </div>
+          <div class="intensity-zone-compare" id="intensityZoneCompareGrid"></div>
+        </section>
+
+        <section class="panel intensity-panel" id="intensity-matrix-panel">
+          <div class="panel-head">
+            <div>
+              <div class="title"><span class="badge">04</span><h2 class="heading">ゾーン再分類マトリクス</h2></div>
+            </div>
+          </div>
+          <div class="matrix-summary-grid" id="intensityMatrixSummary"></div>
+          <div class="chart matrix-chart"><canvas id="intensityReclassificationCanvas" width="1180" height="560" aria-label="zone reclassification matrix"></canvas></div>
+        </section>
       </section>
     </main>
 

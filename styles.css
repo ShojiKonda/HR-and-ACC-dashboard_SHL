@@ -837,3 +837,203 @@ canvas,
   .zone-card-title { font-size: 16px !important; }
   .zone-card-subtitle { font-size: 12px !important; }
 }
+
+/* 2026-06: exercise intensity analysis tab */
+.intensity-controls {
+  margin-bottom: 22px;
+}
+.intensity-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(130px, 1fr));
+  gap: 14px;
+}
+.intensity-metric {
+  min-height: 106px;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.42);
+  border: 0;
+}
+.intensity-metric .metric-label {
+  margin-bottom: 10px;
+}
+.method-compare-grid,
+.intensity-zone-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px;
+  align-items: stretch;
+}
+.method-card,
+.intensity-zone-card {
+  min-width: 0;
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.40);
+}
+.method-card.disabled,
+.intensity-zone-card.disabled {
+  opacity: 0.78;
+}
+.method-card h3,
+.intensity-zone-card h3 {
+  margin: 0 0 4px;
+  color: #fff;
+  font-size: 21px;
+  font-weight: 950;
+}
+.method-subtitle,
+.intensity-zone-head p,
+.intensity-zone-card > p {
+  display: block !important;
+  margin: 0 0 18px;
+  color: #9cc2ee;
+  font-size: 13px;
+  font-weight: 900;
+}
+.method-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+.method-metrics div {
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(17, 24, 39, 0.56);
+}
+.method-metrics span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  margin-bottom: 7px;
+}
+.method-metrics strong {
+  display: block;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 950;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.intensity-zone-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+.intensity-zone-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.selected-sample,
+.average-sample {
+  display: inline-block;
+  width: 28px;
+  height: 10px;
+  border-radius: 999px;
+}
+.selected-sample { background: var(--orange); }
+.average-sample { background: rgba(229, 237, 247, 0.32); }
+.intensity-zone-rows {
+  display: grid;
+  gap: 13px;
+}
+.intensity-zone-row {
+  display: grid;
+  grid-template-columns: 72px minmax(170px, 1fr) 118px;
+  gap: 16px;
+  align-items: center;
+}
+.intensity-zone-track {
+  position: relative;
+  height: 38px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+}
+.intensity-zone-average,
+.intensity-zone-selected {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: inherit;
+}
+.intensity-zone-average {
+  background: rgba(229, 237, 247, 0.30);
+}
+.intensity-zone-selected {
+  top: 7px;
+  bottom: 7px;
+  min-width: 2px;
+  background: var(--c);
+}
+.intensity-zone-value {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.intensity-zone-value strong {
+  color: #fff;
+  font-size: 18px;
+  font-weight: 950;
+}
+.intensity-zone-value span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+.matrix-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.matrix-summary-card {
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.42);
+}
+.matrix-summary-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+  margin-bottom: 8px;
+}
+.matrix-summary-card strong {
+  display: block;
+  color: #fff;
+  font-size: 30px;
+  font-weight: 950;
+  font-variant-numeric: tabular-nums;
+}
+.matrix-chart canvas {
+  min-height: 520px;
+}
+@media (max-width: 1180px) {
+  .intensity-metric-grid { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
+  .method-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .method-compare-grid,
+  .intensity-zone-compare,
+  .matrix-summary-grid { grid-template-columns: 1fr; }
+  .intensity-metric-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+}
+@media (max-width: 640px) {
+  .intensity-metric-grid { grid-template-columns: 1fr; }
+  .intensity-zone-row { grid-template-columns: 58px minmax(120px, 1fr) 92px; gap: 10px; }
+  .method-metrics { grid-template-columns: 1fr; }
+}
+.intensity-zone-row .zone-level {
+  width: 60px;
+  font-size: 15px;
+}

@@ -262,6 +262,9 @@ async function loadTargetFolder() {
     state.loadedFiles = loadedFiles;
     state.failedFiles = failedFiles;
     updateIdSelect();
+    window.__restingDashboardRows = state.rows;
+    window.__restingDashboardConfig = CONFIG;
+    window.dispatchEvent(new CustomEvent('resting-data-loaded'));
 
     if (!loadedFiles.length) {
       setLoadStatus('error', '読込失敗', 'CSVを読み込めませんでした');
@@ -1843,9 +1846,13 @@ function renderSelectors() {
   const ds = dates();
   if (!state.selectedDate || !ds.includes(state.selectedDate)) state.selectedDate = ds[0] || null;
   $("dateSelect").innerHTML = ds.map(d => `<option value="${d}" ${d === state.selectedDate ? "selected" : ""}>${d}</option>`).join("");
+  const intensityDateSelect = $("intensityDateSelect");
+  if (intensityDateSelect) intensityDateSelect.innerHTML = ds.map(d => `<option value="${d}" ${d === state.selectedDate ? "selected" : ""}>${d}</option>`).join("");
   const ss = sensorsForDate(state.selectedDate);
   if (!state.selectedSensor || !ss.includes(state.selectedSensor)) state.selectedSensor = ss[0] || null;
   $("sensorSelect").innerHTML = ss.map(s => `<option value="${s}" ${s === state.selectedSensor ? "selected" : ""}>${s}</option>`).join("");
+  const intensitySensorSelect = $("intensitySensorSelect");
+  if (intensitySensorSelect) intensitySensorSelect.innerHTML = ss.map(s => `<option value="${s}" ${s === state.selectedSensor ? "selected" : ""}>${s}</option>`).join("");
 
   const allSensors = sensors();
   if (!state.compareSensor || !allSensors.includes(state.compareSensor)) state.compareSensor = state.selectedSensor || allSensors[0] || null;
@@ -2479,11 +2486,346 @@ function renderCompareCharts() {
 }
 
 
+
+// ===== Exercise intensity analysis: %HRmax vs %HRR using supine resting HR by matched ID =====
+const INTENSITY_HRMAX = 200;
+const RESTING_BASELINE_DATE = "2026-05-25";
+const RESTING_SUPINE_START = 11 * 3600 + 36 * 60;
+const RESTING_SUPINE_END = 11 * 3600 + 40 * 60;
+const INTENSITY_ZONE_DEFS = [
+  { key: "below", level: "Below", name: "<50%", min: -Infinity, max: 50, color: "#94a3b8" },
+  { key: "z1", level: "1", name: "50-60%", min: 50, max: 60, color: "#cfd8dc" },
+  { key: "z2", level: "2", name: "60-70%", min: 60, max: 70, color: "#4fc3f7" },
+  { key: "z3", level: "3", name: "70-80%", min: 70, max: 80, color: "#9ccc65" },
+  { key: "z4", level: "4", name: "80-90%", min: 80, max: 90, color: "#facc15" },
+  { key: "z5", level: "5", name: "≥90%", min: 90, max: Infinity, color: "#ec4899" }
+];
+const INTENSITY_ZONE_DISPLAY = INTENSITY_ZONE_DEFS.slice().reverse();
+
+function restingRowsForBaseline() {
+  return Array.isArray(window.__restingDashboardRows) ? window.__restingDashboardRows : [];
+}
+function restingBaselineMap() {
+  const byId = new Map();
+  for (const row of restingRowsForBaseline()) {
+    if (row.date !== RESTING_BASELINE_DATE) continue;
+    if (row.secondOfDay < RESTING_SUPINE_START || row.secondOfDay >= RESTING_SUPINE_END) continue;
+    if (!Number.isFinite(row.hr)) continue;
+    if (!byId.has(row.sensorId)) byId.set(row.sensorId, []);
+    byId.get(row.sensorId).push(row.hr);
+  }
+  const out = new Map();
+  for (const [id, values] of byId.entries()) out.set(id, mean(values));
+  return out;
+}
+function restingBaselineForSensor(sensor) {
+  return restingBaselineMap().get(sensor) ?? NaN;
+}
+function exerciseHrValuesForMeasurement(m) {
+  if (!m) return [];
+  return filterRange(m.hr).map(p => p.value).filter(v => Number.isFinite(v) && v > 0);
+}
+function intensityPercentValues(method, m, baselineHr) {
+  const hrs = exerciseHrValuesForMeasurement(m);
+  if (method === "hrmax") return hrs.map(hr => (hr / INTENSITY_HRMAX) * 100).filter(Number.isFinite);
+  const hrr = INTENSITY_HRMAX - baselineHr;
+  if (!Number.isFinite(baselineHr) || !Number.isFinite(hrr) || hrr <= 0) return [];
+  return hrs.map(hr => ((hr - baselineHr) / hrr) * 100).map(v => Math.max(0, v)).filter(Number.isFinite);
+}
+function classifyIntensityZone(value) {
+  const v = Number.isFinite(value) ? value : -Infinity;
+  return INTENSITY_ZONE_DEFS.find(z => v >= z.min && v < z.max) || INTENSITY_ZONE_DEFS[INTENSITY_ZONE_DEFS.length - 1];
+}
+function zoneSummaryFromPercentValues(values) {
+  const zones = INTENSITY_ZONE_DEFS.map(z => ({ ...z, count: 0, pct: 0 }));
+  const valid = values.filter(Number.isFinite);
+  for (const value of valid) {
+    const zone = classifyIntensityZone(value);
+    const target = zones.find(z => z.key === zone.key);
+    if (target) target.count += 1;
+  }
+  const total = valid.length;
+  zones.forEach(z => { z.pct = total ? (z.count / total) * 100 : 0; });
+  return { zones, total };
+}
+function mainZoneLabel(zones) {
+  const best = zones.filter(z => z.key !== "below").reduce((a, b) => (b.pct > (a?.pct ?? -1) ? b : a), null);
+  if (!best || best.pct <= 0) {
+    const below = zones.find(z => z.key === "below");
+    return below && below.pct > 0 ? "Below" : "-";
+  }
+  return `Zone ${best.level}`;
+}
+function intensityMethodMetrics(method, m, baselineHr) {
+  const values = intensityPercentValues(method, m, baselineHr);
+  const { zones, total } = zoneSummaryFromPercentValues(values);
+  const moderatePct = zones.filter(z => z.key !== "below").reduce((sum, z) => sum + z.pct, 0);
+  const highPct = zones.filter(z => z.key === "z4" || z.key === "z5").reduce((sum, z) => sum + z.pct, 0);
+  return {
+    values,
+    zones,
+    total,
+    avg: mean(values),
+    max: safeMax(values, NaN),
+    mainZone: mainZoneLabel(zones),
+    moderatePct,
+    highPct
+  };
+}
+function averageIntensityZonePercentages(method, date) {
+  const baselineMap = restingBaselineMap();
+  const sums = INTENSITY_ZONE_DEFS.map(z => ({ ...z, pct: 0, count: 0 }));
+  let subjectCount = 0;
+  for (const m of state.measurements.filter(item => item.date === date)) {
+    const baselineHr = baselineMap.get(m.sensor);
+    const values = intensityPercentValues(method, m, baselineHr);
+    if (!values.length) continue;
+    const { zones } = zoneSummaryFromPercentValues(values);
+    zones.forEach((z, i) => { sums[i].pct += z.pct; });
+    subjectCount += 1;
+  }
+  if (subjectCount) sums.forEach(z => { z.pct = z.pct / subjectCount; });
+  return { zones: sums, subjectCount };
+}
+function formatPct(value, digits = 1) {
+  return Number.isFinite(value) ? `${value.toFixed(digits)}%` : "-";
+}
+function formatBpm(value, digits = 1) {
+  return Number.isFinite(value) ? `${value.toFixed(digits)} bpm` : "-";
+}
+function intensityMetricCard(label, value, unit = "") {
+  return `<article class="intensity-metric"><p class="metric-label">${label}</p><p class="metric-value">${value}<span class="unit">${unit}</span></p></article>`;
+}
+function renderIntensityBaselinePanel() {
+  const grid = $("intensityBaselineGrid");
+  if (!grid) return;
+  const m = selectedMeasurement();
+  if (!m) {
+    grid.innerHTML = '<div class="empty">選択条件に一致する運動時データがありません。</div>';
+    return;
+  }
+  const baselineHr = restingBaselineForSensor(m.sensor);
+  const hrr = INTENSITY_HRMAX - baselineHr;
+  const hrs = exerciseHrValuesForMeasurement(m);
+  grid.innerHTML = [
+    intensityMetricCard("選択ID", m.sensor, ""),
+    intensityMetricCard("臥位時基準心拍数", formatBpm(baselineHr, 1), ""),
+    intensityMetricCard("HRmax", `${INTENSITY_HRMAX}`, "bpm固定"),
+    intensityMetricCard("心拍予備能 HRR", Number.isFinite(hrr) ? hrr.toFixed(1) : "-", "bpm"),
+    intensityMetricCard("運動時平均心拍数", formatBpm(mean(hrs), 1), ""),
+    intensityMetricCard("運動時最大心拍数", formatBpm(safeMax(hrs, NaN), 0), "")
+  ].join("");
+}
+function methodCompareCard(title, subtitle, metrics, disabled = false) {
+  if (disabled || !metrics || !metrics.total) {
+    return `<article class="method-card disabled"><h3>${title}</h3><p class="method-subtitle">${subtitle}</p><div class="empty">臥位時基準心拍数がないため計算できません。</div></article>`;
+  }
+  return `
+    <article class="method-card">
+      <h3>${title}</h3>
+      <p class="method-subtitle">${subtitle}</p>
+      <div class="method-metrics">
+        <div><span>平均強度</span><strong>${formatPct(metrics.avg)}</strong></div>
+        <div><span>最大強度</span><strong>${formatPct(metrics.max)}</strong></div>
+        <div><span>主ゾーン</span><strong>${metrics.mainZone}</strong></div>
+        <div><span>50%以上</span><strong>${formatPct(metrics.moderatePct)}</strong></div>
+        <div><span>Zone 4+5</span><strong>${formatPct(metrics.highPct)}</strong></div>
+      </div>
+    </article>`;
+}
+function renderIntensityMethodComparison() {
+  const target = $("intensityMethodCompareGrid");
+  if (!target) return;
+  const m = selectedMeasurement();
+  if (!m) {
+    target.innerHTML = '<div class="empty">選択条件に一致する運動時データがありません。</div>';
+    return;
+  }
+  const baselineHr = restingBaselineForSensor(m.sensor);
+  const hrmaxMetrics = intensityMethodMetrics("hrmax", m, baselineHr);
+  const hrrMetrics = intensityMethodMetrics("hrr", m, baselineHr);
+  target.innerHTML = `
+    ${methodCompareCard("%HRmax法", "安静時心拍数を考慮しない", hrmaxMetrics, false)}
+    ${methodCompareCard("%HRR法", "臥位時基準心拍数を考慮", hrrMetrics, !Number.isFinite(baselineHr))}`;
+}
+function renderIntensityZoneRows(selectedZones, averageZones) {
+  const averageMap = new Map((averageZones || []).map(z => [z.key, z.pct]));
+  return INTENSITY_ZONE_DISPLAY.map(zoneDef => {
+    const selected = selectedZones.find(z => z.key === zoneDef.key) || { ...zoneDef, pct: 0 };
+    const avgPct = averageMap.get(zoneDef.key) ?? 0;
+    const label = zoneDef.key === "below" ? "Below" : zoneDef.level;
+    return `
+      <div class="intensity-zone-row">
+        <div class="zone-level" style="--c:${zoneDef.color}">${label}</div>
+        <div class="intensity-zone-track">
+          <div class="intensity-zone-average" style="width:${Math.max(0, Math.min(100, avgPct))}%;"></div>
+          <div class="intensity-zone-selected" style="--c:${zoneDef.color};width:${Math.max(0, Math.min(100, selected.pct))}%;"></div>
+        </div>
+        <div class="intensity-zone-value"><strong>${formatPct(selected.pct)}</strong><span>平均 ${formatPct(avgPct)}</span></div>
+      </div>`;
+  }).join("");
+}
+function renderIntensityZoneBlock(title, subtitle, selectedSummary, averageSummary) {
+  if (!selectedSummary || !selectedSummary.total) {
+    return `<article class="intensity-zone-card"><h3>${title}</h3><p>${subtitle}</p><div class="empty">表示範囲内に心拍データがありません。</div></article>`;
+  }
+  return `
+    <article class="intensity-zone-card">
+      <div class="intensity-zone-head"><h3>${title}</h3><p>${subtitle}</p></div>
+      <div class="intensity-zone-legend"><span><i class="selected-sample"></i>選択ID</span><span><i class="average-sample"></i>全ID平均</span></div>
+      <div class="intensity-zone-rows">${renderIntensityZoneRows(selectedSummary.zones, averageSummary?.zones || [])}</div>
+    </article>`;
+}
+function renderIntensityZoneComparison() {
+  const target = $("intensityZoneCompareGrid");
+  if (!target) return;
+  const m = selectedMeasurement();
+  if (!m) {
+    target.innerHTML = '<div class="empty">選択条件に一致する運動時データがありません。</div>';
+    return;
+  }
+  const baselineHr = restingBaselineForSensor(m.sensor);
+  const hrmaxSelected = zoneSummaryFromPercentValues(intensityPercentValues("hrmax", m, baselineHr));
+  const hrrSelected = zoneSummaryFromPercentValues(intensityPercentValues("hrr", m, baselineHr));
+  const hrmaxAverage = averageIntensityZonePercentages("hrmax", m.date);
+  const hrrAverage = averageIntensityZonePercentages("hrr", m.date);
+  target.innerHTML = `
+    ${renderIntensityZoneBlock("%HRmax法", "安静時心拍数を考慮しない", hrmaxSelected, hrmaxAverage)}
+    ${Number.isFinite(baselineHr) ? renderIntensityZoneBlock("%HRR法", "臥位時基準心拍数を考慮", hrrSelected, hrrAverage) : `<article class="intensity-zone-card"><h3>%HRR法</h3><p>臥位時基準心拍数を考慮</p><div class="empty">臥位時基準心拍数がないため計算できません。</div></article>`}`;
+}
+function buildReclassificationMatrix(m, baselineHr) {
+  const matrix = Array.from({ length: INTENSITY_ZONE_DEFS.length }, () => Array(INTENSITY_ZONE_DEFS.length).fill(0));
+  const hrs = exerciseHrValuesForMeasurement(m);
+  const hrr = INTENSITY_HRMAX - baselineHr;
+  if (!m || !Number.isFinite(baselineHr) || !Number.isFinite(hrr) || hrr <= 0) return { matrix, total: 0, same: 0, higher: 0, lower: 0 };
+  for (const hr of hrs) {
+    const pMax = (hr / INTENSITY_HRMAX) * 100;
+    const pHrr = Math.max(0, ((hr - baselineHr) / hrr) * 100);
+    const r = INTENSITY_ZONE_DEFS.findIndex(z => classifyIntensityZone(pMax).key === z.key);
+    const c = INTENSITY_ZONE_DEFS.findIndex(z => classifyIntensityZone(pHrr).key === z.key);
+    if (r >= 0 && c >= 0) matrix[r][c] += 1;
+  }
+  const total = matrix.flat().reduce((sum, v) => sum + v, 0);
+  let same = 0, higher = 0, lower = 0;
+  matrix.forEach((row, r) => row.forEach((count, c) => {
+    if (c === r) same += count;
+    else if (c > r) higher += count;
+    else lower += count;
+  }));
+  return { matrix, total, same, higher, lower };
+}
+function renderIntensityMatrixSummary() {
+  const target = $("intensityMatrixSummary");
+  if (!target) return null;
+  const m = selectedMeasurement();
+  const baselineHr = m ? restingBaselineForSensor(m.sensor) : NaN;
+  const result = buildReclassificationMatrix(m, baselineHr);
+  if (!m || !result.total) {
+    target.innerHTML = '<div class="empty">ゾーン再分類を計算できません。</div>';
+    return result;
+  }
+  target.innerHTML = `
+    <article class="matrix-summary-card"><span>一致率</span><strong>${formatPct((result.same / result.total) * 100)}</strong></article>
+    <article class="matrix-summary-card"><span>HRR法で高いゾーン</span><strong>${formatPct((result.higher / result.total) * 100)}</strong></article>
+    <article class="matrix-summary-card"><span>HRR法で低いゾーン</span><strong>${formatPct((result.lower / result.total) * 100)}</strong></article>`;
+  return result;
+}
+function drawIntensityMatrix(result) {
+  const canvas = $("intensityReclassificationCanvas");
+  if (!canvas) return;
+  const { ctx, width, height } = canvasContext(canvas);
+  if (width < 320 || height < 160) return;
+  if (!result || !result.total) {
+    title(ctx, "ゾーン再分類マトリクス", "臥位時基準心拍数がない、または表示範囲内に心拍データがありません。");
+    return;
+  }
+  const labels = INTENSITY_ZONE_DEFS.map(z => z.key === "below" ? "Below" : `Z${z.level}`);
+  const n = labels.length;
+  const left = 132;
+  const top = 90;
+  const right = width - 38;
+  const bottom = height - 70;
+  const cell = Math.min((right - left) / n, (bottom - top) / n);
+  const gridW = cell * n;
+  const gridH = cell * n;
+  const x0 = left + ((right - left) - gridW) / 2;
+  const y0 = top;
+
+  ctx.save();
+  ctx.fillStyle = WHITE;
+  ctx.font = fnt(950, 18);
+  ctx.textAlign = "left";
+  ctx.fillText("%HRmax法 → %HRR法", 24, 30);
+  ctx.fillStyle = MUTED;
+  ctx.font = fnt(800, 12);
+  ctx.fillText("各セルは表示範囲内時間の割合を示します。", 24, 54);
+
+  ctx.font = fnt(900, 12);
+  ctx.textAlign = "center";
+  labels.forEach((label, i) => {
+    ctx.fillStyle = INK;
+    ctx.fillText(label, x0 + i * cell + cell / 2, y0 - 20);
+  });
+  ctx.save();
+  ctx.translate(x0 + gridW / 2, y0 - 52);
+  ctx.fillStyle = MUTED;
+  ctx.font = fnt(900, 13);
+  ctx.fillText("%HRR法", 0, 0);
+  ctx.restore();
+
+  labels.forEach((label, i) => {
+    ctx.fillStyle = INK;
+    ctx.textAlign = "right";
+    ctx.fillText(label, x0 - 16, y0 + i * cell + cell / 2);
+  });
+  ctx.save();
+  ctx.translate(28, y0 + gridH / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillStyle = MUTED;
+  ctx.font = fnt(900, 13);
+  ctx.textAlign = "center";
+  ctx.fillText("%HRmax法", 0, 0);
+  ctx.restore();
+
+  const maxPct = Math.max(1, ...result.matrix.flat().map(v => (v / result.total) * 100));
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      const pct = (result.matrix[r][c] / result.total) * 100;
+      const x = x0 + c * cell;
+      const y = y0 + r * cell;
+      const alpha = Math.max(0.08, Math.min(0.95, pct / maxPct));
+      let fill = `rgba(96, 165, 250, ${0.18 + alpha * 0.44})`;
+      if (c > r) fill = `rgba(248, 113, 113, ${0.16 + alpha * 0.48})`;
+      if (c < r) fill = `rgba(34, 211, 238, ${0.14 + alpha * 0.42})`;
+      ctx.fillStyle = fill;
+      ctx.fillRect(x + 2, y + 2, cell - 4, cell - 4);
+      ctx.strokeStyle = "rgba(255,255,255,.16)";
+      ctx.strokeRect(x + 2, y + 2, cell - 4, cell - 4);
+      if (pct >= 0.05) {
+        ctx.fillStyle = WHITE;
+        ctx.font = fnt(900, cell < 70 ? 11 : 13);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`${pct.toFixed(1)}%`, x + cell / 2, y + cell / 2);
+      }
+    }
+  }
+  ctx.restore();
+}
+function renderIntensityAnalysis() {
+  renderIntensityBaselinePanel();
+  renderIntensityMethodComparison();
+  renderIntensityZoneComparison();
+  const matrixResult = renderIntensityMatrixSummary();
+  drawIntensityMatrix(matrixResult);
+}
+
 function updateAll() {
   renderSelectors();
   renderKpis();
   renderPersonalCharts();
   renderCompareCharts();
+  renderIntensityAnalysis();
 }
 
 function bindEvents() {
@@ -2501,6 +2843,15 @@ function bindEvents() {
     updateAll();
   });
   $("sensorSelect").addEventListener("change", e => { state.selectedSensor = e.target.value; updateAll(); });
+  const intensityDateSelect = $("intensityDateSelect");
+  if (intensityDateSelect) intensityDateSelect.addEventListener("change", e => {
+    state.selectedDate = e.target.value;
+    state.selectedSensor = sensorsForDate(state.selectedDate)[0] || state.selectedSensor;
+    updateAll();
+  });
+  const intensitySensorSelect = $("intensitySensorSelect");
+  if (intensitySensorSelect) intensitySensorSelect.addEventListener("change", e => { state.selectedSensor = e.target.value; updateAll(); });
+  window.addEventListener("resting-data-loaded", () => updateAll());
   $("compareSensorSelect").addEventListener("change", e => {
     state.compareSensor = e.target.value;
     state.compareDates = new Set(datesForSensor(state.compareSensor));
