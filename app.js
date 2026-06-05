@@ -1,19 +1,34 @@
 const state = {
-  rows: [],
-  ids: [],
-  selectedId: '',
-  loadedFiles: [],
-  failedFiles: [],
+  activeTab: 'resting-tab',
+  rest: {
+    rows: [],
+    ids: [],
+    selectedId: '',
+    loadedFiles: [],
+    failedFiles: [],
+  },
+  exercise: {
+    folders: [],
+    folderLabelMap: new Map(),
+    selectedFolder: '',
+    selectedId: '',
+    rowsByFolder: new Map(),
+    loadedByFolder: new Map(),
+    failedByFolder: new Map(),
+    loadingFolders: new Set(),
+  },
   hover: null,
 };
 
 const CONFIG = {
   repoFullName: 'ShojiKonda/HR-and-ACC-dashboard_SHL',
   branch: 'main',
-  dataFolder: 'data/2026_05_25',
-  defaultDate: '2026-05-25',
-  displayStartSecond: 11 * 3600 + 20 * 60,
-  displayEndSecond: 11 * 3600 + 45 * 60,
+  dataRoot: 'data',
+  restFolder: 'data/2026_05_25',
+  restDate: '2026-05-25',
+  exercisePreferredFolder: 'data/2026_06_01',
+  restStartSecond: 11 * 3600 + 20 * 60,
+  restEndSecond: 11 * 3600 + 45 * 60,
   histogramBinWidth: 5,
   phaseWindows: [
     { key: 'walkHr', label: '歩行', timeLabel: '11:24〜11:28', start: 11 * 3600 + 24 * 60, end: 11 * 3600 + 28 * 60 },
@@ -28,8 +43,6 @@ const CONFIG = {
   ],
 };
 
-CONFIG.contentsApiUrl = `https://api.github.com/repos/${CONFIG.repoFullName}/contents/${CONFIG.dataFolder}?ref=${CONFIG.branch}`;
-
 const COLORS = {
   ink: '#ffffff',
   muted: '#cbd5e1',
@@ -41,11 +54,16 @@ const COLORS = {
   blue: '#60a5fa',
   green: '#34d399',
   red: '#f87171',
+  accX: '#f87171',
+  accY: '#34d399',
+  accZ: '#60a5fa',
 };
 
 const CHART_FONT_FAMILY = '"Noto Sans JP", "Hiragino Sans", "Yu Gothic", "Yu Gothic UI", Meiryo, sans-serif';
 const chartFont = (weight, size) => `${weight} ${size}px ${CHART_FONT_FAMILY}`;
 const el = (id) => document.getElementById(id);
+const contentsApiUrl = (path) => `https://api.github.com/repos/${CONFIG.repoFullName}/contents/${path}?ref=${CONFIG.branch}`;
+const rawUrl = (path) => `https://raw.githubusercontent.com/${CONFIG.repoFullName}/${CONFIG.branch}/${path}`;
 
 function parseNumber(value) {
   if (value === null || value === undefined) return NaN;
@@ -105,13 +123,37 @@ async function fetchText(path) {
   return await res.text();
 }
 
+async function listFolder(path) {
+  const res = await fetch(contentsApiUrl(path), {
+    cache: 'no-store',
+    headers: { Accept: 'application/vnd.github+json' },
+  });
+  if (!res.ok) throw new Error(`Cannot list ${path}`);
+  const items = await res.json();
+  if (!Array.isArray(items)) throw new Error(`${path} の一覧を取得できません。`);
+  return items;
+}
+
+async function listCsvFilesInFolder(folder) {
+  const items = await listFolder(folder);
+  return items
+    .filter((item) => item.type === 'file')
+    .filter((item) => /\.csv$/i.test(item.name))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ja'))
+    .map((item) => ({
+      name: item.name,
+      path: item.path,
+      url: item.download_url || rawUrl(item.path),
+    }));
+}
+
 function findColumn(header, candidates) {
-  const lower = header.map((h) => String(h).trim().toLowerCase());
+  const lower = header.map((h) => String(h).trim().toLowerCase().replace(/[\s_\-()\[\]（）]/g, ''));
   for (const name of candidates) {
-    const key = String(name).toLowerCase();
+    const key = String(name).toLowerCase().replace(/[\s_\-()\[\]（）]/g, '');
     const exact = lower.indexOf(key);
     if (exact >= 0) return exact;
-    const partial = lower.findIndex((h) => h.includes(key));
+    const partial = lower.findIndex((h) => h.includes(key) || key.includes(h));
     if (partial >= 0) return partial;
   }
   return -1;
@@ -122,8 +164,7 @@ function headerIndex(rows) {
     const lower = row.map((x) => String(x).trim().toLowerCase());
     return lower.includes('sensorid') &&
       (lower.includes('timestamp') || lower.includes('minute') || lower.includes('time')) &&
-      (lower.includes('heartrate') || lower.includes('heartrate_bpm') || lower.includes('meanheartrate_bpm')) &&
-      lower.includes('accnorm');
+      (lower.includes('heartrate') || lower.includes('heart rate') || lower.includes('hr') || lower.includes('heartrate_bpm') || lower.includes('meanheartrate_bpm'));
   });
 }
 
@@ -132,6 +173,17 @@ function normalizeDate(raw, fallbackDate) {
   const m = s.match(/(20\d{2})[-/](\d{1,2})[-/](\d{1,2})/);
   if (!m) return fallbackDate;
   return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+}
+
+function dateFromFolder(folder) {
+  const m = String(folder || '').match(/(20\d{2})_(\d{2})_(\d{2})/);
+  if (!m) return CONFIG.restDate;
+  return `${m[1]}-${m[2]}-${m[3]}`;
+}
+
+function folderLabel(folder) {
+  const m = String(folder || '').match(/(20\d{2})_(\d{2})_(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : folder.replace(/^data\//, '');
 }
 
 function normalizeTimestamp(raw, fallbackDate) {
@@ -162,7 +214,7 @@ function normalizeTimestamp(raw, fallbackDate) {
   return null;
 }
 
-function parseSensorCsv(text, fileName = '') {
+function parseSensorCsv(text, fileName = '', fallbackDate = CONFIG.restDate) {
   const rows = parseCsv(text);
   if (!rows.length) return [];
 
@@ -172,22 +224,28 @@ function parseSensorCsv(text, fileName = '') {
   const dateIdx = findColumn(header, ['Date', '日付']);
   const idIdx = findColumn(header, ['SensorID', 'ID', 'id']);
   const timeIdx = findColumn(header, ['Timestamp', 'Minute', 'DateTime', 'Time', '時刻']);
-  const hrIdx = findColumn(header, ['HeartRate', 'HeartRate_bpm', 'MeanHeartRate_bpm', 'HR', '心拍数']);
-  const accIdx = findColumn(header, ['AccNorm', 'AccelerationNorm', 'ACCNorm', '加速度ノルム']);
+  const hrIdx = findColumn(header, ['HeartRate', 'Heart Rate', 'HeartRate_bpm', 'MeanHeartRate_bpm', 'HR', '心拍数']);
+  const accNormIdx = findColumn(header, ['AccNorm', 'AccelerationNorm', 'ACCNorm', '加速度ノルム']);
+  const accXIdx = findColumn(header, ['ACC_X', 'AccX', 'ACC X', 'Acceleration X', 'X']);
+  const accYIdx = findColumn(header, ['ACC_Y', 'AccY', 'ACC Y', 'Acceleration Y', 'Y']);
+  const accZIdx = findColumn(header, ['ACC_Z', 'AccZ', 'ACC Z', 'Acceleration Z', 'Z']);
 
-  if (idIdx < 0 || timeIdx < 0 || hrIdx < 0 || accIdx < 0) {
-    throw new Error(`${fileName}: 必要な列（SensorID, Timestamp, HeartRate, AccNorm）が見つかりません。`);
+  if (idIdx < 0 || timeIdx < 0 || hrIdx < 0) {
+    throw new Error(`${fileName}: 必要な列（SensorID, Timestamp, HeartRate）が見つかりません。`);
   }
 
   return rows.slice(idx + 1).map((r, i) => {
-    const fallbackDate = dateIdx >= 0 ? normalizeDate(r[dateIdx], CONFIG.defaultDate) : CONFIG.defaultDate;
-    const parsedTime = normalizeTimestamp(r[timeIdx], fallbackDate);
+    const rowDate = dateIdx >= 0 ? normalizeDate(r[dateIdx], fallbackDate) : fallbackDate;
+    const parsedTime = normalizeTimestamp(r[timeIdx], rowDate);
     if (!parsedTime) return null;
     const sensorId = String(r[idIdx] || '').trim();
     if (!sensorId) return null;
     const hr = parseNumber(r[hrIdx]);
-    const accNorm = parseNumber(r[accIdx]);
-    if (!Number.isFinite(hr) && !Number.isFinite(accNorm)) return null;
+    const accNorm = accNormIdx >= 0 ? parseNumber(r[accNormIdx]) : NaN;
+    const accX = accXIdx >= 0 ? parseNumber(r[accXIdx]) : NaN;
+    const accY = accYIdx >= 0 ? parseNumber(r[accYIdx]) : NaN;
+    const accZ = accZIdx >= 0 ? parseNumber(r[accZIdx]) : NaN;
+    if (![hr, accNorm, accX, accY, accZ].some(Number.isFinite)) return null;
     return {
       sourceIndex: i,
       sourceFile: fileName,
@@ -197,6 +255,9 @@ function parseSensorCsv(text, fileName = '') {
       time: parsedTime.time,
       hr,
       accNorm,
+      accX,
+      accY,
+      accZ,
     };
   }).filter(Boolean);
 }
@@ -209,127 +270,251 @@ function setLoadStatus(kind, title, detail = '') {
   el('loadStatusDetail').textContent = detail;
 }
 
-async function listCsvFilesInFolder() {
-  const res = await fetch(CONFIG.contentsApiUrl, {
-    cache: 'no-store',
-    headers: { Accept: 'application/vnd.github+json' },
+function setActiveTab(tabId) {
+  state.activeTab = tabId;
+  document.querySelectorAll('.dashboard-tab').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.tabTarget === tabId);
   });
-  if (!res.ok) throw new Error(`Cannot list ${CONFIG.dataFolder}`);
-  const items = await res.json();
-  if (!Array.isArray(items)) throw new Error(`${CONFIG.dataFolder} の一覧を取得できません。`);
+  document.querySelectorAll('.tab-panel').forEach((panel) => {
+    panel.classList.toggle('active', panel.id === tabId);
+  });
+  state.hover = null;
 
-  return items
-    .filter((item) => item.type === 'file')
-    .filter((item) => /\.csv$/i.test(item.name))
-    .sort((a, b) => a.name.localeCompare(b.name, 'ja'))
-    .map((item) => ({
-      name: item.name,
-      url: item.download_url || `https://raw.githubusercontent.com/${CONFIG.repoFullName}/${CONFIG.branch}/${item.path}`,
-    }));
+  if (tabId === 'exercise-tab') {
+    const folder = state.exercise.selectedFolder;
+    const loaded = folder ? state.exercise.loadedByFolder.get(folder) : [];
+    if (folder && (!loaded || !loaded.length)) loadExerciseFolder(folder);
+    else updateStatusForActiveTab();
+  } else {
+    updateStatusForActiveTab();
+  }
+  drawAll();
 }
 
-async function loadTargetFolder() {
-  setLoadStatus('loading', '読み込み中', `${CONFIG.dataFolder} 内のCSVを確認しています`);
+function updateStatusForActiveTab() {
+  if (state.activeTab === 'exercise-tab') {
+    const folder = state.exercise.selectedFolder;
+    if (!folder) return setLoadStatus('loading', '読み込み中', '計測日フォルダを確認しています');
+    if (state.exercise.loadingFolders.has(folder)) return setLoadStatus('loading', '読み込み中', `${folder} のCSVを読み込んでいます`);
+    const loaded = state.exercise.loadedByFolder.get(folder) || [];
+    const failed = state.exercise.failedByFolder.get(folder) || [];
+    if (!loaded.length && failed.length) return setLoadStatus('error', '読込失敗', `${folder} を確認してください`);
+    if (failed.length) return setLoadStatus('error', '一部読込失敗', `${loaded.length} CSV読込 / ${failed.length} CSV失敗`);
+    if (loaded.length) return setLoadStatus('ready', '読込完了', `${folder}: ${loaded.length} CSV`);
+    return setLoadStatus('loading', '読み込み中', `${folder} を確認しています`);
+  }
+
+  const loaded = state.rest.loadedFiles;
+  const failed = state.rest.failedFiles;
+  if (!loaded.length && failed.length) return setLoadStatus('error', '読込失敗', `${CONFIG.restFolder} を確認してください`);
+  if (failed.length) return setLoadStatus('error', '一部読込失敗', `${loaded.length} CSV読込 / ${failed.length} CSV失敗`);
+  if (loaded.length) return setLoadStatus('ready', '読込完了', `${loaded.length} CSV`);
+  return setLoadStatus('loading', '読み込み中', `${CONFIG.restFolder} 内のCSVを確認しています`);
+}
+
+async function loadFolderRows(folder) {
+  const files = await listCsvFilesInFolder(folder);
+  const loadedRows = [];
+  const loadedFiles = [];
+  const failedFiles = [];
+  const fallbackDate = dateFromFolder(folder);
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    setLoadStatus('loading', '読み込み中', `${folder}: ${i + 1}/${files.length} CSV`);
+    try {
+      const text = await fetchText(file.url);
+      const rows = parseSensorCsv(text, file.name, fallbackDate);
+      loadedRows.push(...rows);
+      loadedFiles.push(file.name);
+    } catch (err) {
+      failedFiles.push({ name: file.name, error: err.message || String(err) });
+    }
+  }
+  return { rows: loadedRows, loadedFiles, failedFiles };
+}
+
+async function loadRestFolder() {
+  updateStatusForActiveTab();
   drawAll();
-
   try {
-    const files = await listCsvFilesInFolder();
-    if (!files.length) {
-      setLoadStatus('error', 'CSVなし', `${CONFIG.dataFolder} にCSVがありません`);
-      updateIdSelect();
-      drawAll();
-      return;
-    }
-
-    const loadedRows = [];
-    const loadedFiles = [];
-    const failedFiles = [];
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      setLoadStatus('loading', '読み込み中', `${i + 1}/${files.length} CSV`);
-      try {
-        const text = await fetchText(file.url);
-        const rows = parseSensorCsv(text, file.name);
-        loadedRows.push(...rows);
-        loadedFiles.push(file.name);
-      } catch (err) {
-        failedFiles.push({ name: file.name, error: err.message || String(err) });
-      }
-    }
-
-    state.rows = loadedRows;
-    state.loadedFiles = loadedFiles;
-    state.failedFiles = failedFiles;
-    updateIdSelect();
-
-    if (!loadedFiles.length) {
-      setLoadStatus('error', '読込失敗', 'CSVを読み込めませんでした');
-    } else if (failedFiles.length) {
-      setLoadStatus('error', '一部読込失敗', `${loadedFiles.length} CSV読込 / ${failedFiles.length} CSV失敗`);
-      console.warn('CSV read failures:', failedFiles);
-    } else {
-      setLoadStatus('ready', '読込完了', `${loadedFiles.length} CSV`);
-    }
-
+    const { rows, loadedFiles, failedFiles } = await loadFolderRows(CONFIG.restFolder);
+    state.rest.rows = rows;
+    state.rest.loadedFiles = loadedFiles;
+    state.rest.failedFiles = failedFiles;
+    updateRestIdSelect();
+    updateStatusForActiveTab();
+    if (failedFiles.length) console.warn('Rest CSV read failures:', failedFiles);
     drawAll();
   } catch (err) {
     console.error(err);
-    setLoadStatus('error', '読込失敗', `${CONFIG.dataFolder} を確認してください`);
-    updateIdSelect();
+    state.rest.failedFiles = [{ name: CONFIG.restFolder, error: err.message || String(err) }];
+    updateRestIdSelect();
+    updateStatusForActiveTab();
     drawAll();
   }
 }
 
-function getTargetRows() {
-  return state.rows
-    .filter((r) => r.date === CONFIG.defaultDate)
-    .filter((r) => r.secondOfDay >= CONFIG.displayStartSecond && r.secondOfDay <= CONFIG.displayEndSecond)
+async function initializeExerciseFolders() {
+  try {
+    const items = await listFolder(CONFIG.dataRoot);
+    const folders = items
+      .filter((item) => item.type === 'dir')
+      .filter((item) => /20\d{2}_\d{2}_\d{2}/.test(item.name))
+      .map((item) => item.path)
+      .sort((a, b) => a.localeCompare(b, 'ja'));
+
+    state.exercise.folders = folders.length ? folders : [CONFIG.restFolder];
+    const preferred = state.exercise.folders.includes(CONFIG.exercisePreferredFolder)
+      ? CONFIG.exercisePreferredFolder
+      : (state.exercise.folders.find((folder) => folder !== CONFIG.restFolder) || state.exercise.folders[0]);
+    state.exercise.selectedFolder = preferred;
+    updateExerciseDateSelect();
+    updateExerciseIdSelect();
+    if (state.activeTab === 'exercise-tab') loadExerciseFolder(preferred);
+  } catch (err) {
+    console.error(err);
+    state.exercise.folders = [CONFIG.restFolder, CONFIG.exercisePreferredFolder];
+    state.exercise.selectedFolder = CONFIG.exercisePreferredFolder;
+    updateExerciseDateSelect();
+    updateExerciseIdSelect();
+  }
+}
+
+async function loadExerciseFolder(folder) {
+  if (!folder || state.exercise.loadingFolders.has(folder)) return;
+  state.exercise.loadingFolders.add(folder);
+  updateStatusForActiveTab();
+  drawAll();
+
+  try {
+    const { rows, loadedFiles, failedFiles } = await loadFolderRows(folder);
+    state.exercise.rowsByFolder.set(folder, rows);
+    state.exercise.loadedByFolder.set(folder, loadedFiles);
+    state.exercise.failedByFolder.set(folder, failedFiles);
+    if (failedFiles.length) console.warn('Exercise CSV read failures:', failedFiles);
+  } catch (err) {
+    console.error(err);
+    state.exercise.rowsByFolder.set(folder, []);
+    state.exercise.loadedByFolder.set(folder, []);
+    state.exercise.failedByFolder.set(folder, [{ name: folder, error: err.message || String(err) }]);
+  } finally {
+    state.exercise.loadingFolders.delete(folder);
+    updateExerciseIdSelect();
+    updateExerciseRangeLabel();
+    updateStatusForActiveTab();
+    drawAll();
+  }
+}
+
+function getRestTargetRows() {
+  return state.rest.rows
+    .filter((r) => r.date === CONFIG.restDate)
+    .filter((r) => r.secondOfDay >= CONFIG.restStartSecond && r.secondOfDay <= CONFIG.restEndSecond)
     .sort((a, b) => a.secondOfDay - b.secondOfDay || a.sensorId.localeCompare(b.sensorId));
 }
 
-function updateIdSelect() {
-  const select = el('idSelect');
-  const targetRows = getTargetRows();
+function getExerciseRows() {
+  const folder = state.exercise.selectedFolder;
+  return (state.exercise.rowsByFolder.get(folder) || [])
+    .slice()
+    .sort((a, b) => a.secondOfDay - b.secondOfDay || a.sensorId.localeCompare(b.sensorId));
+}
+
+function getExerciseTimeRange() {
+  const rows = getExerciseRows();
+  const seconds = rows.map((r) => r.secondOfDay).filter(Number.isFinite);
+  if (!seconds.length) return { start: 0, end: 1 };
+  const start = Math.min(...seconds);
+  const end = Math.max(...seconds);
+  return { start, end: Math.max(end, start + 60) };
+}
+
+function updateRestIdSelect() {
+  const select = el('restIdSelect');
+  const targetRows = getRestTargetRows();
   const ids = [...new Set(targetRows.map((r) => r.sensorId))].sort((a, b) => a.localeCompare(b, 'ja'));
-  state.ids = ids;
+  state.rest.ids = ids;
 
   select.innerHTML = '';
   if (!ids.length) {
-    select.appendChild(new Option(state.loadedFiles.length ? '対象データなし' : 'CSVを読み込み中', ''));
+    select.appendChild(new Option(state.rest.loadedFiles.length ? '対象データなし' : 'CSVを読み込み中', ''));
     select.disabled = true;
-    state.selectedId = '';
+    state.rest.selectedId = '';
     return;
   }
 
   ids.forEach((id) => select.appendChild(new Option(id, id)));
   select.disabled = false;
-  if (ids.includes(state.selectedId)) {
-    select.value = state.selectedId;
+  if (ids.includes(state.rest.selectedId)) {
+    select.value = state.rest.selectedId;
   } else {
-    state.selectedId = ids[0];
-    select.value = state.selectedId;
+    state.rest.selectedId = ids[0];
+    select.value = state.rest.selectedId;
   }
 }
 
-function buildSelectedSeries(metric) {
-  const targetRows = getTargetRows().filter((r) => r.sensorId === state.selectedId);
-  const bySecond = new Map();
-  targetRows.forEach((r) => {
-    const value = r[metric];
-    if (!Number.isFinite(value)) return;
-    if (!bySecond.has(r.secondOfDay)) bySecond.set(r.secondOfDay, []);
-    bySecond.get(r.secondOfDay).push(value);
+function updateExerciseDateSelect() {
+  const select = el('exerciseDateSelect');
+  select.innerHTML = '';
+  if (!state.exercise.folders.length) {
+    select.appendChild(new Option('計測日なし', ''));
+    select.disabled = true;
+    return;
+  }
+  state.exercise.folders.forEach((folder) => {
+    select.appendChild(new Option(folderLabel(folder), folder));
   });
-  return [...bySecond.entries()].sort((a, b) => a[0] - b[0]).map(([second, values]) => ({
-    second,
-    value: mean(values),
-    n: values.length,
-  }));
+  select.disabled = false;
+  select.value = state.exercise.selectedFolder || state.exercise.folders[0];
 }
 
-function buildClassAverageSeries(metric) {
-  const targetRows = getTargetRows();
+function updateExerciseIdSelect() {
+  const select = el('exerciseIdSelect');
+  const rows = getExerciseRows();
+  const ids = [...new Set(rows.map((r) => r.sensorId))].sort((a, b) => a.localeCompare(b, 'ja'));
+
+  select.innerHTML = '';
+  if (!ids.length) {
+    select.appendChild(new Option(rows.length ? '対象IDなし' : 'CSVを読み込み中', ''));
+    select.disabled = true;
+    state.exercise.selectedId = '';
+    return;
+  }
+  ids.forEach((id) => select.appendChild(new Option(id, id)));
+  select.disabled = false;
+  if (ids.includes(state.exercise.selectedId)) {
+    select.value = state.exercise.selectedId;
+  } else {
+    state.exercise.selectedId = ids[0];
+    select.value = state.exercise.selectedId;
+  }
+}
+
+function updateExerciseRangeLabel() {
+  const label = el('exerciseRangeLabel');
+  const rows = getExerciseRows();
+  if (!rows.length) {
+    label.textContent = '自動';
+    return;
+  }
+  const range = getExerciseTimeRange();
+  label.textContent = `${secondToLabel(range.start)}〜${secondToLabel(range.end)}`;
+}
+
+function buildSeries(rows, selectedId, metric, mode = 'selected') {
+  const targetRows = mode === 'selected' ? rows.filter((r) => r.sensorId === selectedId) : rows;
+  const bySecond = new Map();
+  if (mode === 'selected') {
+    targetRows.forEach((r) => {
+      const value = r[metric];
+      if (!Number.isFinite(value)) return;
+      if (!bySecond.has(r.secondOfDay)) bySecond.set(r.secondOfDay, []);
+      bySecond.get(r.secondOfDay).push(value);
+    });
+    return [...bySecond.entries()].sort((a, b) => a[0] - b[0]).map(([second, values]) => ({ second, value: mean(values), n: values.length }));
+  }
+
   const bySecondById = new Map();
   targetRows.forEach((r) => {
     const value = r[metric];
@@ -424,10 +609,10 @@ function drawNoData(ctx, w, h, text) {
   ctx.fillText(text, w / 2, h / 2);
 }
 
-function drawGrid(ctx, box, axis, yLabel, digits = 0) {
-  const start = CONFIG.displayStartSecond;
-  const end = CONFIG.displayEndSecond;
+function drawTimeGrid(ctx, box, axis, yLabel, digits, range, tickMinutes = 5) {
   const yRange = Math.max(1e-9, axis.max - axis.min);
+  const start = range.start;
+  const end = range.end;
 
   ctx.save();
   ctx.strokeStyle = COLORS.grid;
@@ -446,9 +631,12 @@ function drawGrid(ctx, box, axis, yLabel, digits = 0) {
     ctx.fillText(fmtNumber(v, digits), box.left - 12, y);
   }
 
+  const rangeMinutes = Math.max(1, (end - start) / 60);
+  const step = rangeMinutes > 90 ? 15 * 60 : tickMinutes * 60;
+  const firstTick = Math.ceil(start / step) * step;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  for (let s = start; s <= end; s += 5 * 60) {
+  for (let s = firstTick; s <= end + 1e-9; s += step) {
     const x = box.left + ((s - start) / (end - start)) * box.width;
     ctx.beginPath();
     ctx.moveTo(x, box.top);
@@ -480,15 +668,13 @@ function drawGrid(ctx, box, axis, yLabel, digits = 0) {
   ctx.restore();
 }
 
-function pointToCanvas(pt, box, axis) {
-  const start = CONFIG.displayStartSecond;
-  const end = CONFIG.displayEndSecond;
-  const x = box.left + ((pt.second - start) / (end - start)) * box.width;
+function pointToCanvas(pt, box, axis, range) {
+  const x = box.left + ((pt.second - range.start) / (range.end - range.start)) * box.width;
   const y = box.bottom - ((pt.value - axis.min) / (axis.max - axis.min)) * box.height;
   return { x, y };
 }
 
-function drawLine(ctx, series, box, axis, color, width = 3, dashed = false, alpha = 1) {
+function drawLine(ctx, series, box, axis, range, color, width = 3, dashed = false, alpha = 1) {
   ctx.save();
   ctx.strokeStyle = color;
   ctx.lineWidth = width;
@@ -503,7 +689,7 @@ function drawLine(ctx, series, box, axis, color, width = 3, dashed = false, alph
       started = false;
       return;
     }
-    const { x, y } = pointToCanvas(pt, box, axis);
+    const { x, y } = pointToCanvas(pt, box, axis, range);
     if (!started) {
       ctx.moveTo(x, y);
       started = true;
@@ -531,13 +717,14 @@ function findNearest(series, second) {
 
 function drawHover(ctx, box, axis, selectedSeries, classSeries, options) {
   if (!state.hover || state.hover.canvasId !== options.canvasId) return;
-  const second = CONFIG.displayStartSecond + (state.hover.x - box.left) / box.width * (CONFIG.displayEndSecond - CONFIG.displayStartSecond);
-  if (second < CONFIG.displayStartSecond || second > CONFIG.displayEndSecond) return;
+  const range = options.range;
+  const second = range.start + (state.hover.x - box.left) / box.width * (range.end - range.start);
+  if (second < range.start || second > range.end) return;
   const selected = findNearest(selectedSeries, second);
   const average = findNearest(classSeries, second);
   if (!selected && !average) return;
 
-  const guideX = box.left + ((second - CONFIG.displayStartSecond) / (CONFIG.displayEndSecond - CONFIG.displayStartSecond)) * box.width;
+  const guideX = box.left + ((second - range.start) / (range.end - range.start)) * box.width;
   ctx.save();
   ctx.strokeStyle = 'rgba(255,255,255,0.34)';
   ctx.lineWidth = 1.5;
@@ -550,10 +737,10 @@ function drawHover(ctx, box, axis, selectedSeries, classSeries, options) {
 
   const rows = [];
   const fmt = (value) => `${fmtNumber(value, options.digits)}${options.unit ? ` ${options.unit}` : ''}`;
-  if (selected) rows.push({ label: `選択ID ${state.selectedId}`, value: fmt(selected.value), color: COLORS.orange, second: selected.second, raw: selected.value });
+  if (selected) rows.push({ label: `選択ID ${options.selectedId}`, value: fmt(selected.value), color: COLORS.orange, second: selected.second, raw: selected.value });
   if (average) rows.push({ label: '全員平均', value: fmt(average.value), color: COLORS.classLine, second: average.second, raw: average.value });
   rows.forEach((row) => {
-    const yPoint = pointToCanvas({ second: row.second, value: row.raw }, box, axis);
+    const yPoint = pointToCanvas({ second: row.second, value: row.raw }, box, axis, range);
     ctx.fillStyle = row.color;
     ctx.beginPath();
     ctx.arc(yPoint.x, yPoint.y, 4.5, 0, Math.PI * 2);
@@ -624,31 +811,93 @@ function drawReferenceLine(ctx, box, axis, value, label) {
   ctx.restore();
 }
 
-function drawTimeSeries(canvasId, metric, options) {
+function drawTimeSeries(canvasId, rows, selectedId, metric, options) {
   const canvas = el(canvasId);
   const { ctx, w, h } = getCanvasContext(canvas);
-  const selectedSeries = buildSelectedSeries(metric);
-  const classSeries = buildClassAverageSeries(metric);
+  const selectedSeries = buildSeries(rows, selectedId, metric, 'selected');
+  const classSeries = buildSeries(rows, selectedId, metric, 'average');
+  const range = options.range;
 
-  if (!state.rows.length) return drawNoData(ctx, w, h, 'CSVを読み込んでいます。');
+  if (!rows.length) return drawNoData(ctx, w, h, 'CSVを読み込んでいます。');
   if (!selectedSeries.length && !classSeries.length) return drawNoData(ctx, w, h, '対象時間帯にデータがありません。');
 
   clearCanvas(ctx, w, h);
-  const box = chartBox(w, h, 96, 24, 36, 78);
+  const box = chartBox(w, h, options.left || 96, 24, 36, 78);
   const values = selectedSeries.concat(classSeries).map((p) => p.value);
   const axis = getYAxis(values, options.fallbackAxis, 5);
-  drawGrid(ctx, box, axis, options.yLabel, options.digits);
+  drawTimeGrid(ctx, box, axis, options.yLabel, options.digits, range, options.tickMinutes || 5);
   if (options.referenceValue !== undefined && options.referenceLabel) {
     drawReferenceLine(ctx, box, axis, options.referenceValue, options.referenceLabel);
   }
-  drawLine(ctx, classSeries, box, axis, COLORS.classLine, 3, true, 0.95);
-  drawLine(ctx, selectedSeries, box, axis, COLORS.orange, 3.2, false, 1);
-  drawHover(ctx, box, axis, selectedSeries, classSeries, { ...options, canvasId });
+  drawLine(ctx, classSeries, box, axis, range, COLORS.classLine, 3, true, 0.95);
+  drawLine(ctx, selectedSeries, box, axis, range, COLORS.orange, 3.2, false, 1);
+  drawHover(ctx, box, axis, selectedSeries, classSeries, { ...options, canvasId, selectedId, range });
 }
 
+function drawExerciseAcceleration() {
+  const canvasId = 'exerciseAccelCanvas';
+  const canvas = el(canvasId);
+  const { ctx, w, h } = getCanvasContext(canvas);
+  const rows = getExerciseRows();
+  const selectedId = state.exercise.selectedId;
+  const range = getExerciseTimeRange();
+
+  if (!rows.length) return drawNoData(ctx, w, h, 'CSVを読み込んでいます。');
+  const selectedRows = rows.filter((r) => r.sensorId === selectedId);
+  const hasAxes = selectedRows.some((r) => Number.isFinite(r.accX) || Number.isFinite(r.accY) || Number.isFinite(r.accZ));
+
+  if (!hasAxes) {
+    el('exerciseAccelTitle').textContent = '加速度ノルム';
+    el('exerciseAccelSubtitle').textContent = 'AccNorm';
+    return drawTimeSeries(canvasId, rows, selectedId, 'accNorm', {
+      range,
+      yLabel: '加速度ノルム',
+      unit: '',
+      digits: 3,
+      fallbackAxis: { min: 0.8, max: 1.2, step: 0.1, minSpan: 0.05, pad: 0.02 },
+      referenceValue: 1.0,
+      referenceLabel: '1.000',
+      tickMinutes: 10,
+    });
+  }
+
+  el('exerciseAccelTitle').textContent = '3軸加速度';
+  el('exerciseAccelSubtitle').textContent = 'X / Y / Z';
+
+  const seriesX = buildSeries(rows, selectedId, 'accX', 'selected');
+  const seriesY = buildSeries(rows, selectedId, 'accY', 'selected');
+  const seriesZ = buildSeries(rows, selectedId, 'accZ', 'selected');
+  const values = seriesX.concat(seriesY, seriesZ).map((p) => p.value).filter(Number.isFinite);
+  if (!values.length) return drawNoData(ctx, w, h, '対象時間帯に加速度データがありません。');
+
+  clearCanvas(ctx, w, h);
+  const box = chartBox(w, h, 96, 24, 36, 78);
+  const axis = getYAxis(values, { min: -2, max: 2, step: 1, minSpan: 1, pad: 0.2 }, 5);
+  drawTimeGrid(ctx, box, axis, '加速度', 2, range, 10);
+  drawLine(ctx, seriesX, box, axis, range, COLORS.accX, 2.2, false, 1);
+  drawLine(ctx, seriesY, box, axis, range, COLORS.accY, 2.2, false, 1);
+  drawLine(ctx, seriesZ, box, axis, range, COLORS.accZ, 2.2, false, 1);
+
+  ctx.save();
+  const labels = [
+    { label: 'X', color: COLORS.accX },
+    { label: 'Y', color: COLORS.accY },
+    { label: 'Z', color: COLORS.accZ },
+  ];
+  ctx.font = chartFont(900, 13);
+  let x = box.left + 8;
+  labels.forEach((item) => {
+    ctx.fillStyle = item.color;
+    ctx.fillRect(x, box.top + 8, 22, 4);
+    ctx.fillStyle = COLORS.ink;
+    ctx.fillText(item.label, x + 30, box.top + 14);
+    x += 62;
+  });
+  ctx.restore();
+}
 
 function buildPhaseTrendProfiles() {
-  const targetRows = getTargetRows().filter((r) => Number.isFinite(r.hr));
+  const targetRows = getRestTargetRows().filter((r) => Number.isFinite(r.hr));
   const ids = [...new Set(targetRows.map((r) => r.sensorId))].sort((a, b) => a.localeCompare(b, 'ja'));
   const profiles = ids.map((id) => {
     const values = CONFIG.phaseWindows.map((period) => {
@@ -666,13 +915,15 @@ function buildPhaseTrendProfiles() {
     return mean(values);
   });
 
-  const selectedProfile = profiles.find((profile) => profile.id === state.selectedId) || null;
+  const selectedProfile = profiles.find((profile) => profile.id === state.rest.selectedId) || null;
   return { profiles, meanValues, selectedProfile };
 }
 
 function phasePointToCanvas(index, value, box, axis) {
   const denom = Math.max(1, CONFIG.phaseWindows.length - 1);
-  const x = box.left + (index / denom) * box.width;
+  const xPad = Math.max(58, box.width * 0.075);
+  const usableWidth = Math.max(1, box.width - xPad * 2);
+  const x = box.left + xPad + (index / denom) * usableWidth;
   const y = box.bottom - ((value - axis.min) / (axis.max - axis.min)) * box.height;
   return { x, y };
 }
@@ -686,7 +937,6 @@ function drawCategoricalLine(ctx, values, box, axis, color, width = 2, dashed = 
   ctx.setLineDash(dashed ? [9, 7] : []);
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
-
   ctx.beginPath();
   let started = false;
   values.forEach((value, index) => {
@@ -704,7 +954,6 @@ function drawCategoricalLine(ctx, values, box, axis, color, width = 2, dashed = 
   });
   ctx.stroke();
   ctx.setLineDash([]);
-
   values.forEach((value, index) => {
     if (!Number.isFinite(value)) return;
     const { x, y } = phasePointToCanvas(index, value, box, axis);
@@ -718,13 +967,13 @@ function drawCategoricalLine(ctx, values, box, axis, color, width = 2, dashed = 
 function drawPhaseTrend() {
   const canvas = el('phaseTrendCanvas');
   const { ctx, w, h } = getCanvasContext(canvas);
-  if (!state.rows.length) return drawNoData(ctx, w, h, 'CSVを読み込んでいます。');
+  if (!state.rest.rows.length) return drawNoData(ctx, w, h, 'CSVを読み込んでいます。');
 
   const { profiles, meanValues, selectedProfile } = buildPhaseTrendProfiles();
   if (!profiles.length) return drawNoData(ctx, w, h, '対象時間帯に心拍データがありません。');
 
   clearCanvas(ctx, w, h);
-  const box = chartBox(w, h, 88, 34, 42, 92);
+  const box = chartBox(w, h, 126, 34, 54, 92);
   const values = profiles.flatMap((profile) => profile.values).concat(meanValues).filter(Number.isFinite);
   const axis = getYAxis(values, { min: 40, max: 140, step: 20, minSpan: 20, pad: 5 }, 5);
   const yRange = Math.max(1e-9, axis.max - axis.min);
@@ -736,7 +985,6 @@ function drawPhaseTrend() {
   ctx.font = chartFont(700, 15);
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
-
   for (let v = axis.min; v <= axis.max + 1e-9; v += axis.step) {
     const y = box.bottom - ((v - axis.min) / yRange) * box.height;
     ctx.beginPath();
@@ -750,10 +998,6 @@ function drawPhaseTrend() {
   ctx.textBaseline = 'top';
   CONFIG.phaseWindows.forEach((period, index) => {
     const { x } = phasePointToCanvas(index, axis.min, box, axis);
-    ctx.beginPath();
-    ctx.moveTo(x, box.top);
-    ctx.lineTo(x, box.bottom);
-    ctx.stroke();
     ctx.fillStyle = COLORS.ink;
     ctx.font = chartFont(900, 16);
     ctx.fillText(period.label, x, box.bottom + 13);
@@ -782,42 +1026,37 @@ function drawPhaseTrend() {
   ctx.restore();
 
   profiles.forEach((profile) => {
-    if (profile.id === state.selectedId) return;
+    if (profile.id === state.rest.selectedId) return;
     drawCategoricalLine(ctx, profile.values, box, axis, 'rgba(203, 213, 225, 0.28)', 1.4, false, 1, 2.2);
   });
-
   drawCategoricalLine(ctx, meanValues, box, axis, COLORS.classLine, 3.4, true, 1, 4.2);
-
-  if (selectedProfile) {
-    drawCategoricalLine(ctx, selectedProfile.values, box, axis, COLORS.orange, 3.8, false, 1, 5);
-  }
+  if (selectedProfile) drawCategoricalLine(ctx, selectedProfile.values, box, axis, COLORS.orange, 3.8, false, 1, 5);
 
   ctx.font = chartFont(900, 13);
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'bottom';
   CONFIG.phaseWindows.forEach((_, index) => {
     const meanValue = meanValues[index];
     if (!Number.isFinite(meanValue)) return;
     const { x, y } = phasePointToCanvas(index, meanValue, box, axis);
     ctx.fillStyle = COLORS.classLine;
-    ctx.fillText(`平均 ${fmtNumber(meanValue, 1)}`, x, y - 9);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(`平均 ${fmtNumber(meanValue, 1)}`, x, Math.max(box.top + 18, y - 9));
   });
-
   if (selectedProfile) {
-    ctx.textBaseline = 'top';
     selectedProfile.values.forEach((value, index) => {
       if (!Number.isFinite(value)) return;
       const { x, y } = phasePointToCanvas(index, value, box, axis);
       ctx.fillStyle = COLORS.orange;
-      ctx.fillText(fmtNumber(value, 1), x, y + 10);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(fmtNumber(value, 1), x, Math.min(box.bottom - 16, y + 10));
     });
   }
-
   ctx.restore();
 }
 
 function buildPeriodHrDistribution(period) {
-  const targetRows = getTargetRows().filter((r) =>
+  const targetRows = getRestTargetRows().filter((r) =>
     r.secondOfDay >= period.start &&
     r.secondOfDay < period.end &&
     Number.isFinite(r.hr)
@@ -850,9 +1089,7 @@ function buildHistogramData(distribution, xMin, xMax, binWidth) {
 function computeSharedHistogramAxis(distributions) {
   const values = distributions.flatMap((d) => d.map((x) => x.value)).filter(Number.isFinite);
   const binWidth = CONFIG.histogramBinWidth;
-  if (!values.length) {
-    return { xMin: 40, xMax: 120, binWidth, yMax: 5, yStep: 1 };
-  }
+  if (!values.length) return { xMin: 40, xMax: 120, binWidth, yMax: 5, yStep: 1 };
   const minValue = Math.min(...values);
   const maxValue = Math.max(...values);
   let xMin = Math.floor((minValue - binWidth) / binWidth) * binWidth;
@@ -872,7 +1109,7 @@ function computeSharedHistogramAxis(distributions) {
 function drawHistogramCanvas(period, distribution, axis) {
   const canvas = el(period.canvasId);
   const { ctx, w, h } = getCanvasContext(canvas);
-  if (!state.rows.length) return drawNoData(ctx, w, h, 'CSVを読み込んでいます。');
+  if (!state.rest.rows.length) return drawNoData(ctx, w, h, 'CSVを読み込んでいます。');
   if (!distribution.length) return drawNoData(ctx, w, h, '対象時間帯に心拍データがありません。');
 
   clearCanvas(ctx, w, h);
@@ -887,7 +1124,6 @@ function drawHistogramCanvas(period, distribution, axis) {
   ctx.font = chartFont(700, 12);
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
-
   for (let v = 0; v <= axis.yMax + 1e-9; v += axis.yStep) {
     const y = box.bottom - (v / yRange) * box.height;
     ctx.beginPath();
@@ -928,7 +1164,7 @@ function drawHistogramCanvas(period, distribution, axis) {
     ctx.fillRect(x0 + 1.5, y, bw, bh);
   });
 
-  const selected = distribution.find((d) => d.id === state.selectedId);
+  const selected = distribution.find((d) => d.id === state.rest.selectedId);
   if (selected && Number.isFinite(selected.value)) {
     const x = box.left + ((selected.value - axis.xMin) / (axis.xMax - axis.xMin)) * box.width;
     ctx.strokeStyle = COLORS.orange;
@@ -937,8 +1173,7 @@ function drawHistogramCanvas(period, distribution, axis) {
     ctx.moveTo(x, box.top);
     ctx.lineTo(x, box.bottom);
     ctx.stroke();
-
-    const label = `${state.selectedId}: ${fmtNumber(selected.value, 1)} bpm`;
+    const label = `${state.rest.selectedId}: ${fmtNumber(selected.value, 1)} bpm`;
     ctx.font = chartFont(900, 13);
     const labelW = ctx.measureText(label).width + 18;
     const labelX = Math.min(box.right - labelW, Math.max(box.left, x + 8));
@@ -974,19 +1209,21 @@ function drawHistogramCanvas(period, distribution, axis) {
 function updateSummaryHistograms() {
   const distributions = CONFIG.summaryWindows.map(buildPeriodHrDistribution);
   const axis = computeSharedHistogramAxis(distributions);
-  CONFIG.summaryWindows.forEach((period, i) => {
-    drawHistogramCanvas(period, distributions[i], axis);
-  });
+  CONFIG.summaryWindows.forEach((period, i) => drawHistogramCanvas(period, distributions[i], axis));
 }
 
-function drawAll() {
-  drawTimeSeries('heartRateCanvas', 'hr', {
+function drawRestingTab() {
+  const rows = getRestTargetRows();
+  const range = { start: CONFIG.restStartSecond, end: CONFIG.restEndSecond };
+  drawTimeSeries('restHeartRateCanvas', rows, state.rest.selectedId, 'hr', {
+    range,
     yLabel: '心拍数（bpm）',
     unit: 'bpm',
     digits: 0,
     fallbackAxis: { min: 40, max: 120, step: 20, minSpan: 10, pad: 5 },
   });
-  drawTimeSeries('accNormCanvas', 'accNorm', {
+  drawTimeSeries('restAccNormCanvas', rows, state.rest.selectedId, 'accNorm', {
+    range,
     yLabel: '加速度ノルム',
     unit: '',
     digits: 3,
@@ -998,14 +1235,58 @@ function drawAll() {
   updateSummaryHistograms();
 }
 
+function drawExerciseTab() {
+  const rows = getExerciseRows();
+  const range = getExerciseTimeRange();
+  updateExerciseRangeLabel();
+  drawTimeSeries('exerciseHeartRateCanvas', rows, state.exercise.selectedId, 'hr', {
+    range,
+    yLabel: '心拍数（bpm）',
+    unit: 'bpm',
+    digits: 0,
+    fallbackAxis: { min: 40, max: 160, step: 20, minSpan: 10, pad: 5 },
+    tickMinutes: 10,
+  });
+  drawExerciseAcceleration();
+}
+
+function drawAll() {
+  if (state.activeTab === 'resting-tab') drawRestingTab();
+  else drawExerciseTab();
+}
+
 function setupEvents() {
-  el('idSelect').addEventListener('change', (e) => {
-    state.selectedId = e.target.value;
+  document.querySelectorAll('.dashboard-tab').forEach((button) => {
+    button.addEventListener('click', () => setActiveTab(button.dataset.tabTarget));
+  });
+
+  el('restIdSelect').addEventListener('change', (e) => {
+    state.rest.selectedId = e.target.value;
     state.hover = null;
     drawAll();
   });
 
-  ['heartRateCanvas', 'accNormCanvas'].forEach((canvasId) => {
+  el('exerciseDateSelect').addEventListener('change', (e) => {
+    state.exercise.selectedFolder = e.target.value;
+    state.exercise.selectedId = '';
+    state.hover = null;
+    updateExerciseIdSelect();
+    const loaded = state.exercise.loadedByFolder.get(state.exercise.selectedFolder) || [];
+    if (!loaded.length) loadExerciseFolder(state.exercise.selectedFolder);
+    else {
+      updateExerciseRangeLabel();
+      updateStatusForActiveTab();
+      drawAll();
+    }
+  });
+
+  el('exerciseIdSelect').addEventListener('change', (e) => {
+    state.exercise.selectedId = e.target.value;
+    state.hover = null;
+    drawAll();
+  });
+
+  ['restHeartRateCanvas', 'restAccNormCanvas', 'exerciseHeartRateCanvas', 'exerciseAccelCanvas'].forEach((canvasId) => {
     const canvas = el(canvasId);
     canvas.addEventListener('mousemove', (event) => {
       const rect = canvas.getBoundingClientRect();
@@ -1022,4 +1303,5 @@ function setupEvents() {
 }
 
 setupEvents();
-loadTargetFolder();
+loadRestFolder();
+initializeExerciseFolders();

@@ -3,122 +3,177 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>HR ACC Dashboard SHL | Tab 1</title>
+    <title>HR ACC Dashboard SHL</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <header class="hero">
       <div class="hero-copy">
         <p class="eyebrow">HR ACC Dashboard SHL</p>
-        <h1>安静時心拍数・加速度ノルム</h1>
-        <p class="lead">5月25日のデータを自動読込し、11:20〜11:45の心拍数と加速度ノルムをID別に表示します。歩行から臥位までの平均心拍数変化も折れ線で表示します。</p>
+        <h1>心拍数・加速度ダッシュボード</h1>
+        <p class="lead">計測日別の心拍数と加速度データをID別に表示します。安静時心拍数では、歩行から臥位までの心拍数低下と姿勢別分布を確認できます。</p>
       </div>
       <aside class="hero-card status-card" aria-live="polite">
         <strong><span id="statusDot" class="status-dot loading"></span><span id="loadStatusTitle">読み込み中</span></strong>
-        <small id="loadStatusDetail">data/2026_05_25/ 内のCSVを確認しています</small>
+        <small id="loadStatusDetail">データフォルダを確認しています</small>
       </aside>
     </header>
 
-    <nav class="tab-nav" aria-label="dashboard tabs">
-      <button class="tab-button active" type="button">タブ1：安静時心拍数</button>
+    <nav class="tab-shell" aria-label="dashboard tabs">
+      <button class="dashboard-tab active" type="button" data-tab-target="resting-tab">安静時心拍数</button>
+      <button class="dashboard-tab" type="button" data-tab-target="exercise-tab">運動時心拍数</button>
     </nav>
 
     <main class="layout">
-      <section class="panel chart-panel" id="resting-timeseries">
-        <div class="section-title">
-          <span>1</span>
-          <div>
-            <h2>時系列データ</h2>
-            <p><code>data/2026_05_25/</code> 内のCSV全ファイルを対象に、11:20〜11:45のデータを表示します。</p>
-          </div>
-        </div>
-
-        <div class="control-row compact-controls">
-          <label>ID選択
-            <select id="idSelect" disabled>
-              <option value="">CSVを読み込み中</option>
-            </select>
-          </label>
-          <div class="range-label">
-            <span>表示範囲</span>
-            <strong>11:20〜11:45</strong>
-          </div>
-        </div>
-
-        <div class="legend" id="chartLegend">
-          <span><i class="line selected-line"></i>選択ID</span>
-          <span><i class="line class-line"></i>全員平均</span>
-        </div>
-
-        <div class="chart-stack">
-          <article class="chart-block">
-            <div class="chart-heading">
-              <h3>心拍数</h3>
-              <small>bpm</small>
+      <section id="resting-tab" class="tab-panel active">
+        <section class="panel chart-panel" id="resting-timeseries">
+          <div class="section-title">
+            <span>1</span>
+            <div>
+              <h2>安静時の時系列データ</h2>
+              <p><code>data/2026_05_25/</code> 内のCSV全ファイルを対象に、11:20〜11:45のデータを表示します。</p>
             </div>
-            <canvas id="heartRateCanvas" width="1180" height="430" aria-label="heart rate time series"></canvas>
-          </article>
+          </div>
+
+          <div class="control-row compact-controls">
+            <label>ID選択
+              <select id="restIdSelect" disabled>
+                <option value="">CSVを読み込み中</option>
+              </select>
+            </label>
+            <div class="range-label">
+              <span>表示範囲</span>
+              <strong>11:20〜11:45</strong>
+            </div>
+          </div>
+
+          <div class="legend" id="restChartLegend">
+            <span><i class="line selected-line"></i>選択ID</span>
+            <span><i class="line class-line"></i>全員平均</span>
+          </div>
+
+          <div class="chart-stack">
+            <article class="chart-block">
+              <div class="chart-heading">
+                <h3>心拍数</h3>
+                <small>bpm</small>
+              </div>
+              <canvas id="restHeartRateCanvas" width="1180" height="430" aria-label="resting heart rate time series"></canvas>
+            </article>
+
+            <article class="chart-block">
+              <div class="chart-heading">
+                <h3>加速度ノルム</h3>
+                <small>AccNorm</small>
+              </div>
+              <canvas id="restAccNormCanvas" width="1180" height="360" aria-label="resting acceleration norm time series"></canvas>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel trend-panel" id="phase-trend">
+          <div class="section-title">
+            <span>2</span>
+            <div>
+              <h2>歩行から臥位までの平均心拍数変化</h2>
+              <p>歩行（11:24〜11:28）、立位（11:32〜11:33）、座位（11:34〜11:35）、臥位（11:36〜11:40）の各区間で平均心拍数を算出します。</p>
+            </div>
+          </div>
+
+          <div class="trend-legend">
+            <span><i class="trend-line all-line"></i>全ID</span>
+            <span><i class="trend-line selected-line"></i>選択ID</span>
+            <span><i class="trend-line mean-line"></i>全員平均</span>
+          </div>
 
           <article class="chart-block">
-            <div class="chart-heading">
-              <h3>加速度ノルム</h3>
-              <small>AccNorm</small>
-            </div>
-            <canvas id="accNormCanvas" width="1180" height="360" aria-label="acceleration norm time series"></canvas>
+            <canvas id="phaseTrendCanvas" width="1180" height="430" aria-label="heart rate decline from walking to supine"></canvas>
           </article>
-        </div>
+        </section>
+
+        <section class="panel summary-panel" id="summary">
+          <div class="section-title">
+            <span>3</span>
+            <div>
+              <h2>姿勢別の平均心拍数分布</h2>
+              <p>各時間帯について、全IDの平均心拍数をヒストグラムで表示します。3つのグラフは横並びで表示し、ビン幅5 bpmと横軸範囲を統一します。選択IDの値はオレンジの縦線で示します。</p>
+            </div>
+          </div>
+
+          <div class="histogram-legend">
+            <span><i class="hist-bar-sample"></i>全IDの分布</span>
+            <span><i class="hist-selected-line"></i>選択ID</span>
+          </div>
+
+          <div class="histogram-grid">
+            <article class="histogram-card">
+              <canvas id="standHistogramCanvas" width="760" height="330" aria-label="standing heart rate histogram"></canvas>
+            </article>
+            <article class="histogram-card">
+              <canvas id="sitHistogramCanvas" width="760" height="330" aria-label="sitting heart rate histogram"></canvas>
+            </article>
+            <article class="histogram-card">
+              <canvas id="supineHistogramCanvas" width="760" height="330" aria-label="supine heart rate histogram"></canvas>
+            </article>
+          </div>
+        </section>
       </section>
 
-      <section class="panel trend-panel" id="phase-trend">
-        <div class="section-title">
-          <span>2</span>
-          <div>
-            <h2>歩行から臥位までの平均心拍数変化</h2>
-            <p>歩行（11:24〜11:28）、立位（11:32〜11:33）、座位（11:34〜11:35）、臥位（11:36〜11:40）の各区間で平均心拍数を算出し、横軸に姿勢・活動条件、縦軸に平均心拍数を表示します。</p>
+      <section id="exercise-tab" class="tab-panel">
+        <section class="panel chart-panel" id="exercise-individual">
+          <div class="section-title">
+            <span>1</span>
+            <div>
+              <h2>計測日別個人データ</h2>
+              <p>計測日とIDを選択し、心拍数と加速度データを時系列で表示します。既定では運動時データとして <code>2026_06_01</code> を優先して読み込みます。</p>
+            </div>
           </div>
-        </div>
 
-        <div class="trend-legend">
-          <span><i class="trend-line all-line"></i>全ID</span>
-          <span><i class="trend-line selected-line"></i>選択ID</span>
-          <span><i class="trend-line mean-line"></i>全員平均</span>
-        </div>
-
-        <article class="chart-block">
-          <canvas id="phaseTrendCanvas" width="1180" height="430" aria-label="heart rate decline from walking to supine"></canvas>
-        </article>
-      </section>
-
-      <section class="panel summary-panel" id="summary">
-        <div class="section-title">
-          <span>3</span>
-          <div>
-            <h2>姿勢別の平均心拍数分布</h2>
-            <p>各時間帯について、全IDの平均心拍数をヒストグラムで表示します。3つのグラフは横並びで表示し、ビン幅5 bpmと横軸範囲を統一します。選択IDの値はオレンジの縦線で示します。</p>
+          <div class="control-row compact-controls">
+            <label>計測日
+              <select id="exerciseDateSelect" disabled>
+                <option value="">計測日を確認中</option>
+              </select>
+            </label>
+            <label>ID選択
+              <select id="exerciseIdSelect" disabled>
+                <option value="">CSVを読み込み中</option>
+              </select>
+            </label>
+            <div class="range-label">
+              <span>表示範囲</span>
+              <strong id="exerciseRangeLabel">自動</strong>
+            </div>
           </div>
-        </div>
 
-        <div class="histogram-legend">
-          <span><i class="hist-bar-sample"></i>全IDの分布</span>
-          <span><i class="hist-selected-line"></i>選択ID</span>
-        </div>
+          <div class="legend" id="exerciseLegend">
+            <span><i class="line selected-line"></i>選択ID</span>
+            <span><i class="line class-line"></i>全員平均</span>
+          </div>
 
-        <div class="histogram-grid">
-          <article class="histogram-card">
-            <canvas id="standHistogramCanvas" width="760" height="330" aria-label="standing heart rate histogram"></canvas>
-          </article>
-          <article class="histogram-card">
-            <canvas id="sitHistogramCanvas" width="760" height="330" aria-label="sitting heart rate histogram"></canvas>
-          </article>
-          <article class="histogram-card">
-            <canvas id="supineHistogramCanvas" width="760" height="330" aria-label="supine heart rate histogram"></canvas>
-          </article>
-        </div>
+          <div class="chart-stack">
+            <article class="chart-block">
+              <div class="chart-heading">
+                <h3>心拍数</h3>
+                <small>bpm</small>
+              </div>
+              <canvas id="exerciseHeartRateCanvas" width="1180" height="430" aria-label="exercise heart rate time series"></canvas>
+            </article>
+
+            <article class="chart-block">
+              <div class="chart-heading">
+                <h3 id="exerciseAccelTitle">加速度ノルム</h3>
+                <small id="exerciseAccelSubtitle">AccNorm</small>
+              </div>
+              <canvas id="exerciseAccelCanvas" width="1180" height="390" aria-label="exercise acceleration time series"></canvas>
+            </article>
+          </div>
+        </section>
       </section>
     </main>
 
     <footer>
-      <small>HR ACC Dashboard SHL / Tab 1</small>
+      <small>HR ACC Dashboard SHL</small>
     </footer>
 
     <script src="app.js"></script>
