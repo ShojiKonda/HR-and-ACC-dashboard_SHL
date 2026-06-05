@@ -3,19 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>HR ACC Dashboard v2 | Resting Heart Rate</title>
+    <title>HR ACC Dashboard SHL | Tab 1</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <header class="hero">
       <div class="hero-copy">
-        <p class="eyebrow">HR ACC Dashboard v2</p>
-        <h1>安静時心拍数</h1>
-        <p class="lead">5月25日の心拍データを読み込み、11:10〜11:50の時系列をID別に表示します。data/2026_05_25内のCSV全ファイルを対象に、選択IDの心拍数と全員平均を重ねて表示します。</p>
+        <p class="eyebrow">HR ACC Dashboard SHL</p>
+        <h1>安静時心拍数・加速度ノルム</h1>
+        <p class="lead">5月25日のデータを自動読込し、11:20〜11:45の心拍数と加速度ノルムをID別に表示します。各グラフには選択IDと全員平均を重ねて表示します。</p>
       </div>
-      <aside class="hero-card">
-        <strong><span class="status-dot"></span>Tab 1</strong>
-        <small>Resting heart rate time series</small>
+      <aside class="hero-card status-card" aria-live="polite">
+        <strong><span id="statusDot" class="status-dot loading"></span><span id="loadStatusTitle">読み込み中</span></strong>
+        <small id="loadStatusDetail">data/2026_05_25/ 内のCSVを確認しています</small>
       </aside>
     </header>
 
@@ -24,86 +24,82 @@
     </nav>
 
     <main class="layout">
-      <section class="panel upload-panel" id="upload">
+      <section class="panel chart-panel" id="resting-timeseries">
         <div class="section-title">
           <span>1</span>
           <div>
-            <h2>5月25日のデータを読み込む</h2>
-            <p><code>data/2026_05_25/</code> 内のCSV全ファイルを自動読込します。対応形式：<code>SensorID, Timestamp, HeartRate</code> を含むCSV。</p>
+            <h2>時系列データ</h2>
+            <p><code>data/2026_05_25/</code> 内のCSV全ファイルを対象に、11:20〜11:45のデータを表示します。</p>
           </div>
         </div>
-        <div class="drop-grid two">
-          <label class="drop-zone" id="restingDrop">
-            <input id="restingInput" type="file" accept=".csv,text/csv" multiple />
-            <strong>心拍CSVを選択</strong>
-            <small>自動読込に失敗した場合は、フォルダ内のCSVを複数選択してください</small>
-            <span id="restingFileName">data/2026_05_25/ 内のCSV全ファイルを自動読込予定</span>
-          </label>
-          <div class="info-box">
-            <strong>表示条件</strong>
-            <dl>
-              <div><dt>対象日</dt><dd><input id="dateInput" class="date-input" type="date" value="2026-05-25" /></dd></div>
-              <div><dt>時刻</dt><dd>11:10〜11:50</dd></div>
-              <div><dt>表示</dt><dd>選択ID + 全員平均</dd></div>
-            </dl>
-          </div>
-        </div>
-      </section>
 
-      <section class="dashboard-grid four">
-        <article class="stat-card">
-          <span class="card-label">読み込みID数</span>
-          <strong id="idCount">0</strong>
-          <small id="idCountNote">データ未読込</small>
-        </article>
-        <article class="stat-card">
-          <span class="card-label">選択ID</span>
-          <strong id="selectedIdCard">-</strong>
-          <small id="selectedIdNote">IDを選択してください</small>
-        </article>
-        <article class="stat-card">
-          <span class="card-label">選択ID 平均心拍数</span>
-          <strong id="selectedMeanHr">-</strong>
-          <small>11:10〜11:50</small>
-        </article>
-        <article class="stat-card">
-          <span class="card-label">全員平均心拍数</span>
-          <strong id="classMeanHr">-</strong>
-          <small>同時刻データから算出</small>
-        </article>
-      </section>
-
-      <section class="panel chart-panel" id="resting-timeseries">
-        <div class="section-title">
-          <span>2</span>
-          <div>
-            <h2>安静時心拍数の時系列</h2>
-            <p>選択したIDの心拍数と、全員の平均心拍数を同じ時間軸で表示します。</p>
-          </div>
-        </div>
         <div class="control-row compact-controls">
           <label>ID選択
             <select id="idSelect" disabled>
-              <option value="">CSVを読み込んでください</option>
+              <option value="">CSVを読み込み中</option>
             </select>
           </label>
-          <label>表示範囲
-            <select id="rangeSelect" disabled>
-              <option>11:10〜11:50</option>
-            </select>
-          </label>
+          <div class="range-label">
+            <span>表示範囲</span>
+            <strong>11:20〜11:45</strong>
+          </div>
         </div>
-        <div class="legend" id="restingLegend">
+
+        <div class="legend" id="chartLegend">
           <span><i class="line selected-line"></i>選択ID</span>
           <span><i class="line class-line"></i>全員平均</span>
-          <span id="dataStatus">データ未読込</span>
         </div>
-        <canvas id="restingCanvas" width="1180" height="540" aria-label="resting heart rate time series"></canvas>
+
+        <div class="chart-stack">
+          <article class="chart-block">
+            <div class="chart-heading">
+              <h3>心拍数</h3>
+              <small>bpm</small>
+            </div>
+            <canvas id="heartRateCanvas" width="1180" height="430" aria-label="heart rate time series"></canvas>
+          </article>
+
+          <article class="chart-block">
+            <div class="chart-heading">
+              <h3>加速度ノルム</h3>
+              <small>AccNorm</small>
+            </div>
+            <canvas id="accNormCanvas" width="1180" height="360" aria-label="acceleration norm time series"></canvas>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel summary-panel" id="summary">
+        <div class="section-title">
+          <span>2</span>
+          <div>
+            <h2>姿勢別の平均心拍数</h2>
+            <p>選択IDの心拍数を、指定時間帯ごとに集計します。</p>
+          </div>
+        </div>
+
+        <div class="summary-grid">
+          <article class="summary-card">
+            <span class="summary-label">立位</span>
+            <strong id="standHr">-</strong>
+            <small>11:32〜11:33</small>
+          </article>
+          <article class="summary-card">
+            <span class="summary-label">座位</span>
+            <strong id="sitHr">-</strong>
+            <small>11:34〜11:35</small>
+          </article>
+          <article class="summary-card">
+            <span class="summary-label">臥位</span>
+            <strong id="supineHr">-</strong>
+            <small>11:36〜11:40</small>
+          </article>
+        </div>
       </section>
     </main>
 
     <footer>
-      <small>HR ACC Dashboard v2 / Tab 1 prototype</small>
+      <small>HR ACC Dashboard SHL / Tab 1</small>
     </footer>
 
     <script src="app.js"></script>
