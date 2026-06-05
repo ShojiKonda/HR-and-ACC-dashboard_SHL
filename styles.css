@@ -471,3 +471,44 @@ footer { padding: 20px clamp(18px, 5vw, 72px) 42px; color: var(--muted); }
   .dashboard-tab { min-width: 160px; font-size: 17px; padding: 13px 20px; }
   .exercise-head-row { grid-template-columns: 1fr; }
 }
+
+/* Frame simplification: keep only the outer numbered panels as visible frames. */
+.chart-block,
+.histogram-card,
+.kpi,
+.metric-box,
+.status.exercise-status {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.chart-block {
+  padding: 0 !important;
+}
+
+.histogram-card {
+  padding: 0 !important;
+}
+
+canvas,
+.histogram-card canvas,
+.chart-panel canvas,
+.chart.tall canvas,
+.chart.scatter canvas {
+  border: 0 !important;
+  box-shadow: none !important;
+  background: #111827;
+}
+
+.kpi {
+  padding: 0 !important;
+}
+
+.metric-box {
+  padding: 4px 0 0 !important;
+}
+
+.status.exercise-status {
+  padding: 0 !important;
+}
