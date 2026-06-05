@@ -120,56 +120,52 @@
       </section>
 
       <section id="exercise-tab" class="tab-panel">
-        <section class="panel chart-panel" id="exercise-individual">
-          <div class="section-title">
-            <span>1</span>
+        <section class="panel">
+          <div class="panel-head">
             <div>
-              <h2>計測日別個人データ</h2>
-              <p>計測日とIDを選択し、心拍数と加速度データを時系列で表示します。既定では運動時データとして <code>2026_06_01</code> を優先して読み込みます。</p>
+              <div class="title"><span class="badge">01</span><h2 class="heading">データ読込と表示対象</h2></div>
+              <p class="panel-note">計測日とID、表示時間範囲を選択し、運動時の心拍数と加速度ノルムを表示します。</p>
             </div>
           </div>
+          <div class="controls">
+            <div class="group"><label for="exerciseDateSelect">計測日</label><select id="exerciseDateSelect" disabled><option value="">計測日を確認中</option></select></div>
+            <div class="group"><label for="exerciseIdSelect">センサID</label><select id="exerciseIdSelect" disabled><option value="">CSVを読み込み中</option></select></div>
+            <div class="group"><label for="exerciseTimeStartSelect">表示開始時刻</label><select id="exerciseTimeStartSelect" class="exercise-time-start" disabled></select></div>
+            <div class="group"><label for="exerciseTimeEndSelect">表示終了時刻</label><select id="exerciseTimeEndSelect" class="exercise-time-end" disabled></select></div>
+          </div>
+          <div class="kpis" id="exerciseKpiGrid"></div>
+        </section>
 
-          <div class="control-row compact-controls">
-            <label>計測日
-              <select id="exerciseDateSelect" disabled>
-                <option value="">計測日を確認中</option>
-              </select>
-            </label>
-            <label>ID選択
-              <select id="exerciseIdSelect" disabled>
-                <option value="">CSVを読み込み中</option>
-              </select>
-            </label>
-            <div class="range-label">
-              <span>表示範囲</span>
-              <strong id="exerciseRangeLabel">自動</strong>
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="title"><span class="badge">02</span><h2 class="heading">心拍・加速度ノルム時系列</h2></div>
             </div>
           </div>
+          <div class="chart tall"><canvas id="exerciseCombinedChart" width="1180" height="640" aria-label="exercise heart rate and acceleration norm time series"></canvas></div>
+          <div class="legend"><span><i class="dot" style="--c:#facc15"></i>心拍数</span><span><i class="dot" style="--c:#22d3ee"></i>加速度ノルム</span></div>
+        </section>
 
-          <div class="legend" id="exerciseLegend">
-            <span><i class="line selected-line"></i>選択ID</span>
-            <span><i class="line class-line"></i>全員平均</span>
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="title"><span class="badge">03</span><h2 class="heading">心拍数のクラス中央値とばらつき</h2></div>
+            </div>
           </div>
+          <div class="chart tall"><canvas id="exerciseClassCombinedChart" width="1180" height="520" aria-label="class heart rate median and variation"></canvas></div>
+          <div class="legend"><span><i class="dot" style="--c:#60a5fa"></i>クラス中央値</span><span><i class="dot" style="--c:rgba(96,165,250,.30)"></i>ばらつき</span><span><i class="dot" style="--c:#facc15"></i>選択個人</span></div>
+        </section>
 
-          <div class="chart-stack">
-            <article class="chart-block">
-              <div class="chart-heading">
-                <h3>心拍数</h3>
-                <small>bpm</small>
-              </div>
-              <canvas id="exerciseHeartRateCanvas" width="1180" height="430" aria-label="exercise heart rate time series"></canvas>
-            </article>
-
-            <article class="chart-block">
-              <div class="chart-heading">
-                <h3 id="exerciseAccelTitle">加速度ノルム</h3>
-                <small id="exerciseAccelSubtitle">AccNorm</small>
-              </div>
-              <canvas id="exerciseAccelCanvas" width="1180" height="390" aria-label="exercise acceleration time series"></canvas>
-            </article>
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="title"><span class="badge">04</span><h2 class="heading">平均加速度と平均心拍数の関係</h2></div>
+            </div>
           </div>
+          <div class="chart scatter"><canvas id="exerciseScatterChart" width="1180" height="520" aria-label="exercise average acceleration versus average heart rate"></canvas></div>
         </section>
       </section>
+
     </main>
 
     <footer>

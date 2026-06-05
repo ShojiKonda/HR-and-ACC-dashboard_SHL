@@ -16,6 +16,8 @@ const state = {
     loadedByFolder: new Map(),
     failedByFolder: new Map(),
     loadingFolders: new Set(),
+    timeStart: null,
+    timeEnd: null,
   },
   hover: null,
 };
@@ -52,6 +54,8 @@ const COLORS = {
   orange: '#fb923c',
   classLine: '#e5edf7',
   blue: '#60a5fa',
+  cyan: '#22d3ee',
+  yellow: '#facc15',
   green: '#34d399',
   red: '#f87171',
   accX: '#f87171',
@@ -401,7 +405,7 @@ async function loadExerciseFolder(folder) {
   } finally {
     state.exercise.loadingFolders.delete(folder);
     updateExerciseIdSelect();
-    updateExerciseRangeLabel();
+    updateExerciseTimeSelects();
     updateStatusForActiveTab();
     drawAll();
   }
@@ -421,13 +425,51 @@ function getExerciseRows() {
     .sort((a, b) => a.secondOfDay - b.secondOfDay || a.sensorId.localeCompare(b.sensorId));
 }
 
-function getExerciseTimeRange() {
+function getExerciseDataRange() {
   const rows = getExerciseRows();
   const seconds = rows.map((r) => r.secondOfDay).filter(Number.isFinite);
   if (!seconds.length) return { start: 0, end: 1 };
-  const start = Math.min(...seconds);
-  const end = Math.max(...seconds);
-  return { start, end: Math.max(end, start + 60) };
+  const start = Math.floor(Math.min(...seconds) / 300) * 300;
+  const end = Math.ceil(Math.max(...seconds) / 300) * 300;
+  return { start, end: Math.max(end, start + 300) };
+}
+
+function ensureExerciseTimeRange() {
+  const dataRange = getExerciseDataRange();
+  if (!getExerciseRows().length) {
+    state.exercise.timeStart = null;
+    state.exercise.timeEnd = null;
+    return;
+  }
+  if (state.exercise.timeStart === null || state.exercise.timeStart < dataRange.start || state.exercise.timeStart >= dataRange.end) {
+    state.exercise.timeStart = dataRange.start;
+  }
+  if (state.exercise.timeEnd === null || state.exercise.timeEnd > dataRange.end || state.exercise.timeEnd <= state.exercise.timeStart) {
+    state.exercise.timeEnd = dataRange.end;
+  }
+  if (state.exercise.timeEnd <= state.exercise.timeStart) {
+    state.exercise.timeEnd = Math.min(dataRange.end, state.exercise.timeStart + 300);
+  }
+}
+
+function getExerciseTimeRange() {
+  ensureExerciseTimeRange();
+  if (state.exercise.timeStart === null || state.exercise.timeEnd === null) return { start: 0, end: 1 };
+  return { start: state.exercise.timeStart, end: Math.max(state.exercise.timeEnd, state.exercise.timeStart + 60) };
+}
+
+function getExerciseRowsInRange() {
+  const range = getExerciseTimeRange();
+  return getExerciseRows().filter((r) => r.secondOfDay >= range.start && r.secondOfDay <= range.end);
+}
+
+function exerciseTimeOptions() {
+  const rows = getExerciseRows();
+  if (!rows.length) return [];
+  const dataRange = getExerciseDataRange();
+  const out = [];
+  for (let s = dataRange.start; s <= dataRange.end; s += 300) out.push(s);
+  return out;
 }
 
 function updateRestIdSelect() {
@@ -491,15 +533,23 @@ function updateExerciseIdSelect() {
   }
 }
 
-function updateExerciseRangeLabel() {
-  const label = el('exerciseRangeLabel');
-  const rows = getExerciseRows();
-  if (!rows.length) {
-    label.textContent = '自動';
+function updateExerciseTimeSelects() {
+  const startSelect = el('exerciseTimeStartSelect');
+  const endSelect = el('exerciseTimeEndSelect');
+  if (!startSelect || !endSelect) return;
+  const opts = exerciseTimeOptions();
+  if (!opts.length) {
+    startSelect.innerHTML = '<option value="">-</option>';
+    endSelect.innerHTML = '<option value="">-</option>';
+    startSelect.disabled = true;
+    endSelect.disabled = true;
     return;
   }
-  const range = getExerciseTimeRange();
-  label.textContent = `${secondToLabel(range.start)}〜${secondToLabel(range.end)}`;
+  ensureExerciseTimeRange();
+  startSelect.disabled = false;
+  endSelect.disabled = false;
+  startSelect.innerHTML = opts.map((s) => `<option value="${s}" ${s === state.exercise.timeStart ? 'selected' : ''}>${secondToLabel(s)}</option>`).join('');
+  endSelect.innerHTML = opts.map((s) => `<option value="${s}" ${s === state.exercise.timeEnd ? 'selected' : ''}>${secondToLabel(s)}</option>`).join('');
 }
 
 function buildSeries(rows, selectedId, metric, mode = 'selected') {
@@ -1235,19 +1285,335 @@ function drawRestingTab() {
   updateSummaryHistograms();
 }
 
-function drawExerciseTab() {
-  const rows = getExerciseRows();
+
+function exerciseRowsForSelectedId() {
   const range = getExerciseTimeRange();
-  updateExerciseRangeLabel();
-  drawTimeSeries('exerciseHeartRateCanvas', rows, state.exercise.selectedId, 'hr', {
-    range,
-    yLabel: '心拍数（bpm）',
-    unit: 'bpm',
-    digits: 0,
-    fallbackAxis: { min: 40, max: 160, step: 20, minSpan: 10, pad: 5 },
-    tickMinutes: 10,
+  return getExerciseRows().filter((r) =>
+    r.sensorId === state.exercise.selectedId &&
+    r.secondOfDay >= range.start && r.secondOfDay <= range.end
+  );
+}
+
+function exerciseValuesForId(id, metric) {
+  const range = getExerciseTimeRange();
+  return getExerciseRows()
+    .filter((r) => r.sensorId === id && r.secondOfDay >= range.start && r.secondOfDay <= range.end)
+    .map((r) => r[metric])
+    .filter(Number.isFinite);
+}
+
+function selectedExerciseMetrics() {
+  const hrValues = exerciseValuesForId(state.exercise.selectedId, 'hr');
+  const accValues = exerciseValuesForId(state.exercise.selectedId, 'accNorm');
+  return {
+    avgHr: mean(hrValues),
+    maxHr: hrValues.length ? Math.max(...hrValues) : NaN,
+    avgAcc: mean(accValues),
+    hrN: hrValues.length,
+    accN: accValues.length,
+  };
+}
+
+function renderExerciseKpis() {
+  const grid = el('exerciseKpiGrid');
+  if (!grid) return;
+  const rows = getExerciseRowsInRange();
+  if (!rows.length || !state.exercise.selectedId) {
+    grid.innerHTML = '<div class="empty">選択条件に一致するデータがありません。</div>';
+    return;
+  }
+  const m = selectedExerciseMetrics();
+  grid.innerHTML = `
+    <article class="kpi heart-kpi">
+      <p class="klabel">心拍数</p>
+      <div class="metric-pair">
+        <div class="metric-box"><p class="metric-label">平均心拍数</p><p class="metric-value">${fmtNumber(m.avgHr, 1)}<span class="unit">bpm</span></p></div>
+        <div class="metric-box"><p class="metric-label">最大心拍数</p><p class="metric-value">${fmtNumber(m.maxHr, 0)}<span class="unit">bpm</span></p></div>
+      </div>
+      <p class="sub">選択IDの表示範囲内平均値です。</p>
+    </article>
+    <article class="kpi acc-kpi">
+      <p class="klabel">加速度ノルム</p>
+      <p class="metric-label">平均加速度ノルム</p>
+      <p class="metric-value">${fmtNumber(m.avgAcc, 3)}<span class="unit">g</span></p>
+      <p class="sub">表示範囲内のAccNorm平均値です。</p>
+    </article>`;
+}
+
+function drawSimpleAxis(ctx, box, axis, yLabel, digits = 0) {
+  const yRange = Math.max(1e-9, axis.max - axis.min);
+  ctx.save();
+  ctx.strokeStyle = COLORS.grid;
+  ctx.lineWidth = 1.15;
+  ctx.fillStyle = COLORS.muted;
+  ctx.font = chartFont(700, 12);
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (let v = axis.min; v <= axis.max + 1e-9; v += axis.step) {
+    const y = box.bottom - ((v - axis.min) / yRange) * box.height;
+    ctx.beginPath();
+    ctx.moveTo(box.left, y);
+    ctx.lineTo(box.right, y);
+    ctx.stroke();
+    ctx.fillText(fmtNumber(v, digits), box.left - 9, y);
+  }
+  ctx.strokeStyle = COLORS.axis;
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(box.left, box.top);
+  ctx.lineTo(box.left, box.bottom);
+  ctx.lineTo(box.right, box.bottom);
+  ctx.stroke();
+  ctx.save();
+  ctx.translate(box.left - 52, box.top + box.height / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillStyle = COLORS.muted;
+  ctx.font = chartFont(800, 12);
+  ctx.textAlign = 'center';
+  ctx.fillText(yLabel, 0, 0);
+  ctx.restore();
+  ctx.restore();
+}
+
+function drawBottomTimeAxis(ctx, box, range) {
+  const rangeMinutes = Math.max(1, (range.end - range.start) / 60);
+  const step = rangeMinutes > 90 ? 15 * 60 : 10 * 60;
+  const firstTick = Math.ceil(range.start / step) * step;
+  ctx.save();
+  ctx.fillStyle = COLORS.muted;
+  ctx.strokeStyle = COLORS.grid;
+  ctx.font = chartFont(800, 12);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (let s = firstTick; s <= range.end + 1e-9; s += step) {
+    const x = box.left + ((s - range.start) / (range.end - range.start)) * box.width;
+    ctx.beginPath();
+    ctx.moveTo(x, box.top);
+    ctx.lineTo(x, box.bottom);
+    ctx.stroke();
+    ctx.fillText(secondToLabel(s), x, box.bottom + 12);
+  }
+  ctx.fillStyle = COLORS.ink;
+  ctx.font = chartFont(800, 13);
+  ctx.fillText('時刻', box.left + box.width / 2, box.bottom + 42);
+  ctx.restore();
+}
+
+function drawSeriesLineBySecond(ctx, series, box, axis, range, color, width = 2.6, alpha = 1, dashed = false) {
+  drawLine(ctx, series.map((p) => ({ second: p.second, value: p.value })), box, axis, range, color, width, dashed, alpha);
+}
+
+function drawBandSeries(ctx, stats, box, axis, range, color) {
+  const pts = stats.filter((p) => Number.isFinite(p.q1) && Number.isFinite(p.q3));
+  if (pts.length < 2) return;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.18;
+  ctx.beginPath();
+  pts.forEach((p, i) => {
+    const x = box.left + ((p.second - range.start) / (range.end - range.start)) * box.width;
+    const y = box.bottom - ((p.q3 - axis.min) / (axis.max - axis.min)) * box.height;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
   });
-  drawExerciseAcceleration();
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    const x = box.left + ((p.second - range.start) / (range.end - range.start)) * box.width;
+    const y = box.bottom - ((p.q1 - axis.min) / (axis.max - axis.min)) * box.height;
+    ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function quantileValue(values, q) {
+  const xs = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!xs.length) return NaN;
+  const pos = (xs.length - 1) * q;
+  const base = Math.floor(pos);
+  const rest = pos - base;
+  return xs[base + 1] === undefined ? xs[base] : xs[base] + rest * (xs[base + 1] - xs[base]);
+}
+
+function buildExerciseClassStats(metric = 'hr') {
+  const range = getExerciseTimeRange();
+  const bySecondById = new Map();
+  getExerciseRows().forEach((r) => {
+    if (r.secondOfDay < range.start || r.secondOfDay > range.end) return;
+    const value = r[metric];
+    if (!Number.isFinite(value)) return;
+    if (!bySecondById.has(r.secondOfDay)) bySecondById.set(r.secondOfDay, new Map());
+    const idMap = bySecondById.get(r.secondOfDay);
+    if (!idMap.has(r.sensorId)) idMap.set(r.sensorId, []);
+    idMap.get(r.sensorId).push(value);
+  });
+  return [...bySecondById.entries()].sort((a, b) => a[0] - b[0]).map(([second, idMap]) => {
+    const idMeans = [...idMap.values()].map(mean).filter(Number.isFinite).sort((a, b) => a - b);
+    return {
+      second,
+      q1: quantileValue(idMeans, 0.25),
+      median: quantileValue(idMeans, 0.5),
+      q3: quantileValue(idMeans, 0.75),
+      n: idMeans.length,
+    };
+  });
+}
+
+function drawExerciseCombinedChart() {
+  const canvas = el('exerciseCombinedChart');
+  const { ctx, w, h } = getCanvasContext(canvas);
+  const rows = getExerciseRowsInRange();
+  const range = getExerciseTimeRange();
+  if (!rows.length) return drawNoData(ctx, w, h, '運動時データを読み込んでいます。');
+
+  clearCanvas(ctx, w, h);
+  const outer = { left: 88, right: w - 40, top: 34, bottom: h - 62 };
+  const gap = 34;
+  const eachH = (outer.bottom - outer.top - gap) / 2;
+  const hrBox = { left: outer.left, right: outer.right, top: outer.top, bottom: outer.top + eachH };
+  const accBox = { left: outer.left, right: outer.right, top: hrBox.bottom + gap, bottom: outer.bottom };
+  [hrBox, accBox].forEach((box) => { box.width = box.right - box.left; box.height = box.bottom - box.top; });
+
+  const hrSeries = buildSeries(rows, state.exercise.selectedId, 'hr', 'selected');
+  const accSeries = buildSeries(rows, state.exercise.selectedId, 'accNorm', 'selected');
+  const hrAxis = { min: 0, max: 200, step: 40 };
+  const accVals = accSeries.map((p) => p.value).filter(Number.isFinite);
+  const accAxis = getYAxis(accVals, { min: 1, max: 2, step: 0.25, minSpan: 0.2, pad: 0.03 }, 4);
+
+  drawSimpleAxis(ctx, hrBox, hrAxis, 'Heart Rate bpm', 0);
+  drawSimpleAxis(ctx, accBox, accAxis, 'Acceleration norm g', 2);
+  drawBottomTimeAxis(ctx, accBox, range);
+  drawReferenceLine(ctx, accBox, accAxis, 1.0, '1.000');
+  drawSeriesLineBySecond(ctx, hrSeries, hrBox, hrAxis, range, COLORS.yellow, 2.8, 1, false);
+  drawSeriesLineBySecond(ctx, accSeries, accBox, accAxis, range, COLORS.cyan, 2.5, 1, false);
+  ctx.save();
+  ctx.fillStyle = COLORS.ink;
+  ctx.font = chartFont(900, 13);
+  ctx.textAlign = 'left';
+  ctx.fillText('心拍数', hrBox.left + 8, hrBox.top + 14);
+  ctx.fillText('加速度ノルム', accBox.left + 8, accBox.top + 14);
+  ctx.restore();
+}
+
+function drawExerciseClassChart() {
+  const canvas = el('exerciseClassCombinedChart');
+  const { ctx, w, h } = getCanvasContext(canvas);
+  const rows = getExerciseRowsInRange();
+  const range = getExerciseTimeRange();
+  if (!rows.length) return drawNoData(ctx, w, h, '運動時データを読み込んでいます。');
+
+  clearCanvas(ctx, w, h);
+  const box = chartBox(w, h, 88, 36, 40, 70);
+  const stats = buildExerciseClassStats('hr');
+  const selected = buildSeries(rows, state.exercise.selectedId, 'hr', 'selected');
+  const values = stats.flatMap((p) => [p.q1, p.median, p.q3]).concat(selected.map((p) => p.value)).filter(Number.isFinite);
+  const axis = getYAxis(values, { min: 40, max: 160, step: 20, minSpan: 20, pad: 5 }, 5);
+  drawSimpleAxis(ctx, box, axis, '平均心拍数 bpm', 0);
+  drawBottomTimeAxis(ctx, box, range);
+  drawBandSeries(ctx, stats, box, axis, range, COLORS.blue);
+  drawSeriesLineBySecond(ctx, stats.map((p) => ({ second: p.second, value: p.median })), box, axis, range, COLORS.blue, 2.5, 1, false);
+  drawSeriesLineBySecond(ctx, selected, box, axis, range, COLORS.yellow, 2.2, 0.95, false);
+}
+
+function exerciseMetricPoints() {
+  const ids = [...new Set(getExerciseRows().map((r) => r.sensorId))].sort((a, b) => a.localeCompare(b, 'ja'));
+  return ids.map((id) => {
+    const hr = exerciseValuesForId(id, 'hr');
+    const acc = exerciseValuesForId(id, 'accNorm');
+    return { id, avgHr: mean(hr), avgAcc: mean(acc), hrN: hr.length, accN: acc.length };
+  }).filter((p) => Number.isFinite(p.avgHr) && Number.isFinite(p.avgAcc));
+}
+
+function drawExerciseScatterChart() {
+  const canvas = el('exerciseScatterChart');
+  const { ctx, w, h } = getCanvasContext(canvas);
+  const pts = exerciseMetricPoints();
+  if (!pts.length) return drawNoData(ctx, w, h, '平均値を計算できるデータがありません。');
+
+  clearCanvas(ctx, w, h);
+  const box = chartBox(w, h, 84, 36, 44, 72);
+  const xs = pts.map((p) => p.avgAcc);
+  const ys = pts.map((p) => p.avgHr);
+  const xMinRaw = Math.min(...xs);
+  const xMaxRaw = Math.max(...xs);
+  const yMinRaw = Math.min(...ys);
+  const yMaxRaw = Math.max(...ys);
+  const xSpan = Math.max(0.05, xMaxRaw - xMinRaw);
+  const ySpan = Math.max(10, yMaxRaw - yMinRaw);
+  const xMin = Math.max(0, xMinRaw - xSpan * 0.12);
+  const xMax = xMaxRaw + xSpan * 0.12;
+  const yMin = Math.max(0, Math.floor((yMinRaw - ySpan * 0.12) / 10) * 10);
+  const yMax = Math.ceil((yMaxRaw + ySpan * 0.12) / 10) * 10;
+  const sx = (v) => box.left + ((v - xMin) / (xMax - xMin || 1)) * box.width;
+  const sy = (v) => box.bottom - ((v - yMin) / (yMax - yMin || 1)) * box.height;
+
+  ctx.save();
+  ctx.strokeStyle = COLORS.axis;
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(box.left, box.top);
+  ctx.lineTo(box.left, box.bottom);
+  ctx.lineTo(box.right, box.bottom);
+  ctx.stroke();
+  ctx.strokeStyle = COLORS.grid;
+  ctx.fillStyle = COLORS.muted;
+  ctx.font = chartFont(700, 12);
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= 5; i++) {
+    const r = i / 5;
+    const y = box.bottom - r * box.height;
+    const v = yMin + r * (yMax - yMin);
+    ctx.beginPath();
+    ctx.moveTo(box.left, y);
+    ctx.lineTo(box.right, y);
+    ctx.stroke();
+    ctx.fillText(fmtNumber(v, 0), box.left - 9, y);
+  }
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= 5; i++) {
+    const r = i / 5;
+    const x = box.left + r * box.width;
+    const v = xMin + r * (xMax - xMin);
+    ctx.fillText(fmtNumber(v, 2), x, box.bottom + 18);
+  }
+  ctx.fillStyle = COLORS.muted;
+  ctx.font = chartFont(800, 13);
+  ctx.fillText('平均加速度ノルム', box.left + box.width / 2, box.bottom + 46);
+  ctx.save();
+  ctx.translate(box.left - 54, box.top + box.height / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('平均心拍数 bpm', 0, 0);
+  ctx.restore();
+  ctx.restore();
+
+  pts.forEach((p) => {
+    const selected = p.id === state.exercise.selectedId;
+    ctx.save();
+    ctx.globalAlpha = selected ? 1 : 0.32;
+    ctx.fillStyle = selected ? COLORS.yellow : COLORS.blue;
+    ctx.beginPath();
+    ctx.arc(sx(p.avgAcc), sy(p.avgHr), selected ? 7 : 4.2, 0, Math.PI * 2);
+    ctx.fill();
+    if (selected) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = COLORS.ink;
+      ctx.font = chartFont(900, 13);
+      ctx.textAlign = 'left';
+      ctx.fillText(`${p.id}`, sx(p.avgAcc) + 12, sy(p.avgHr));
+    }
+    ctx.restore();
+  });
+}
+
+function drawExerciseTab() {
+  updateExerciseTimeSelects();
+  renderExerciseKpis();
+  drawExerciseCombinedChart();
+  drawExerciseClassChart();
+  drawExerciseScatterChart();
 }
 
 function drawAll() {
@@ -1269,12 +1635,14 @@ function setupEvents() {
   el('exerciseDateSelect').addEventListener('change', (e) => {
     state.exercise.selectedFolder = e.target.value;
     state.exercise.selectedId = '';
+    state.exercise.timeStart = null;
+    state.exercise.timeEnd = null;
     state.hover = null;
     updateExerciseIdSelect();
     const loaded = state.exercise.loadedByFolder.get(state.exercise.selectedFolder) || [];
     if (!loaded.length) loadExerciseFolder(state.exercise.selectedFolder);
     else {
-      updateExerciseRangeLabel();
+      updateExerciseTimeSelects();
       updateStatusForActiveTab();
       drawAll();
     }
@@ -1286,7 +1654,25 @@ function setupEvents() {
     drawAll();
   });
 
-  ['restHeartRateCanvas', 'restAccNormCanvas', 'exerciseHeartRateCanvas', 'exerciseAccelCanvas'].forEach((canvasId) => {
+  el('exerciseTimeStartSelect').addEventListener('change', (e) => {
+    state.exercise.timeStart = Number(e.target.value);
+    if (state.exercise.timeEnd !== null && state.exercise.timeStart >= state.exercise.timeEnd) {
+      state.exercise.timeEnd = state.exercise.timeStart + 300;
+    }
+    state.hover = null;
+    drawAll();
+  });
+
+  el('exerciseTimeEndSelect').addEventListener('change', (e) => {
+    state.exercise.timeEnd = Number(e.target.value);
+    if (state.exercise.timeStart !== null && state.exercise.timeEnd <= state.exercise.timeStart) {
+      state.exercise.timeStart = state.exercise.timeEnd - 300;
+    }
+    state.hover = null;
+    drawAll();
+  });
+
+  ['restHeartRateCanvas', 'restAccNormCanvas', 'exerciseCombinedChart', 'exerciseClassCombinedChart', 'exerciseScatterChart'].forEach((canvasId) => {
     const canvas = el(canvasId);
     canvas.addEventListener('mousemove', (event) => {
       const rect = canvas.getBoundingClientRect();
