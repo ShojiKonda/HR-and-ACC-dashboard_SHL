@@ -277,10 +277,14 @@ function setLoadStatus(kind, title, detail = '') {
 function setActiveTab(tabId) {
   state.activeTab = tabId;
   document.querySelectorAll('.dashboard-tab').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.tabTarget === tabId);
+    const isActive = btn.dataset.tabTarget === tabId;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
   });
   document.querySelectorAll('.tab-panel').forEach((panel) => {
-    panel.classList.toggle('active', panel.id === tabId);
+    const isActive = panel.id === tabId;
+    panel.classList.toggle('active', isActive);
+    panel.hidden = !isActive;
   });
   state.hover = null;
 
@@ -1689,5 +1693,6 @@ function setupEvents() {
 }
 
 setupEvents();
+setActiveTab('resting-tab');
 loadRestFolder();
 initializeExerciseFolders();
