@@ -1525,41 +1525,47 @@ function averageHeartZonePercentagesForDate(date, hrMaxRef) {
   return { zones, subjectCount };
 }
 
-function renderClassAverageHeartZoneBar(date, hrMaxRef) {
-  const { zones, subjectCount } = averageHeartZonePercentagesForDate(date, hrMaxRef);
-  if (!subjectCount) return '<div class="zone-empty">表示範囲内に心拍データがあるIDがありません。</div>';
-
-  const rows = zones.slice().reverse().map(z => `
-    <div class="zone-row">
-      <div class="zone-level" style="--c:${z.color}">${z.level}</div>
-      <div class="zone-track"><div class="zone-fill" style="--c:${z.color};width:${Math.max(0, z.pct)}%"></div></div>
-      <div class="zone-time">${z.pct.toFixed(1)}%</div>
-    </div>`).join("");
-  const caption = HR_ZONE_DEFS.slice().reverse().map(z => `<span class="zone-caption-item"><i style="--c:${z.color}"></i>${z.level}: ${z.name}</span>`).join("");
-  return `
-    <div class="zone-block average-zone-block">
-      <div class="zone-head"><span>全ID平均の心拍ゾーン滞在割合</span></div>
-      <div class="zone-rows" aria-label="心拍ゾーン滞在割合の全ID平均">${rows}</div>
-      <div class="zone-caption">${caption}</div>
-    </div>`;
-}
-function renderHeartZoneBar(hrValues, hrMaxRef) {
-  const zones = heartZoneSummary(hrValues, hrMaxRef).slice().reverse();
-  const totalInZones = zones.reduce((sum, z) => sum + z.count, 0);
-  if (!totalInZones) return '<div class="zone-empty">表示範囲内に Polar 心拍ゾーンへ入る心拍データがありません。</div>';
+function renderHeartZoneBlock(zonesInput, title, subtitle, ariaLabel) {
+  const zones = zonesInput.slice().reverse();
   const rows = zones.map(z => `
     <div class="zone-row">
       <div class="zone-level" style="--c:${z.color}">${z.level}</div>
-      <div class="zone-track"><div class="zone-fill" style="--c:${z.color};width:${Math.max(0, z.pct)}%"></div></div>
+      <div class="zone-track"><div class="zone-fill" style="--c:${z.color};width:${Math.max(0, Math.min(100, z.pct))}%"></div></div>
       <div class="zone-time">${z.pct.toFixed(1)}%</div>
     </div>`).join("");
   const caption = HR_ZONE_DEFS.slice().reverse().map(z => `<span class="zone-caption-item"><i style="--c:${z.color}"></i>${z.level}: ${z.name}</span>`).join("");
   return `
-    <div class="zone-block">
-      <div class="zone-head"><span>選択IDの心拍ゾーン滞在割合</span></div>
-      <div class="zone-rows" aria-label="選択IDの心拍ゾーン滞在割合">${rows}</div>
+    <div class="zone-block unified-zone-block">
+      <div class="zone-head">
+        <div class="zone-card-title">${title}</div>
+        <div class="zone-card-subtitle">${subtitle}</div>
+      </div>
+      <div class="zone-rows" aria-label="${ariaLabel}">${rows}</div>
       <div class="zone-caption">${caption}</div>
     </div>`;
+}
+
+function renderClassAverageHeartZoneBar(date, hrMaxRef) {
+  const { zones, subjectCount } = averageHeartZonePercentagesForDate(date, hrMaxRef);
+  if (!subjectCount) return '<div class="zone-empty">表示範囲内に心拍データがあるIDがありません。</div>';
+  return renderHeartZoneBlock(
+    zones,
+    '全ID平均の心拍ゾーン滞在割合',
+    `各IDの割合を平均 / n=${subjectCount}`,
+    '全ID平均の心拍ゾーン滞在割合'
+  );
+}
+
+function renderHeartZoneBar(hrValues, hrMaxRef, sensorId = '') {
+  const zones = heartZoneSummary(hrValues, hrMaxRef);
+  const totalInZones = zones.reduce((sum, z) => sum + z.count, 0);
+  if (!totalInZones) return '<div class="zone-empty">表示範囲内に Polar 心拍ゾーンへ入る心拍データがありません。</div>';
+  return renderHeartZoneBlock(
+    zones,
+    '選択IDの心拍ゾーン滞在割合',
+    sensorId ? `選択ID ${sensorId}` : '選択ID',
+    '選択IDの心拍ゾーン滞在割合'
+  );
 }
 
 function accBandSummary(accValues) {
@@ -1866,9 +1872,9 @@ function renderKpis() {
   const avgHr = mean(hrValues);
   const maxHr = safeMax(hrValues, NaN);
   el.innerHTML = `
-    <article class="kpi heart-kpi">
+    <article class="kpi heart-kpi heart-zone-panel">
       <p class="klabel">心拍数</p>
-      <div class="metric-pair">
+      <div class="metric-pair metric-pair-compact">
         <div class="metric-box">
           <p class="metric-label">平均心拍数</p>
           <p class="metric-value">${formatNumber(avgHr, 1)}<span class="unit">bpm</span></p>
@@ -1878,10 +1884,14 @@ function renderKpis() {
           <p class="metric-value">${formatNumber(maxHr, 0)}<span class="unit">bpm</span></p>
         </div>
       </div>
-      ${renderHeartZoneBar(hrValues, 200)}
-    </article>
-    <article class="kpi class-zone-kpi">
-      ${renderClassAverageHeartZoneBar(state.selectedDate, 200)}
+      <div class="zone-compare-grid">
+        <div class="zone-card selected-zone-card">
+          ${renderHeartZoneBar(hrValues, 200, m.sensor)}
+        </div>
+        <div class="zone-card average-zone-card">
+          ${renderClassAverageHeartZoneBar(state.selectedDate, 200)}
+        </div>
+      </div>
     </article>`;
 }
 

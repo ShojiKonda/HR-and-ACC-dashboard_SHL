@@ -741,3 +741,99 @@ canvas,
     padding-top: 0 !important;
   }
 }
+
+
+/* 2026-06 final: unify selected-ID and all-ID-average heart-zone components. */
+.kpis {
+  grid-template-columns: 1fr !important;
+}
+.heart-zone-panel {
+  width: 100%;
+}
+.metric-pair-compact {
+  max-width: 760px;
+  margin-bottom: 28px;
+}
+.zone-compare-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 34px;
+  align-items: start;
+}
+.zone-card,
+.selected-zone-card,
+.average-zone-card {
+  min-width: 0;
+}
+.unified-zone-block,
+.zone-block.unified-zone-block {
+  margin-top: 0 !important;
+}
+.zone-head,
+.zone-block .zone-head {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: flex-start !important;
+  align-items: flex-start !important;
+  min-height: 62px !important;
+  margin-bottom: 18px !important;
+  gap: 5px !important;
+}
+.zone-card-title {
+  display: block !important;
+  color: #ffffff !important;
+  font-size: 18px !important;
+  font-weight: 950 !important;
+  line-height: 1.25 !important;
+}
+.zone-card-subtitle {
+  display: block !important;
+  color: #9cc2ee !important;
+  font-size: 13px !important;
+  font-weight: 900 !important;
+  line-height: 1.25 !important;
+}
+.zone-row,
+.zone-block .zone-row {
+  grid-template-columns: 60px minmax(180px, 1fr) 92px !important;
+  gap: 18px !important;
+  align-items: center !important;
+}
+.zone-level {
+  justify-self: start;
+}
+.zone-track {
+  width: 100%;
+}
+.zone-time,
+.heart-kpi .zone-time,
+.class-zone-kpi .zone-time {
+  min-width: 92px !important;
+  text-align: right !important;
+  font-variant-numeric: tabular-nums !important;
+}
+.class-zone-kpi,
+.average-zone-card {
+  padding-top: 0 !important;
+}
+.zone-caption {
+  min-height: 20px;
+}
+@media (max-width: 1050px) {
+  .zone-compare-grid {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+  .metric-pair-compact {
+    max-width: none;
+  }
+}
+@media (max-width: 760px) {
+  .zone-row,
+  .zone-block .zone-row {
+    grid-template-columns: 46px minmax(120px, 1fr) 78px !important;
+    gap: 10px !important;
+  }
+  .zone-card-title { font-size: 16px !important; }
+  .zone-card-subtitle { font-size: 12px !important; }
+}
