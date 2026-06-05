@@ -14,10 +14,11 @@ const CONFIG = {
   defaultDate: '2026-05-25',
   displayStartSecond: 11 * 3600 + 20 * 60,
   displayEndSecond: 11 * 3600 + 45 * 60,
+  histogramBinWidth: 2,
   summaryWindows: [
-    { key: 'standHr', label: '立位', start: 11 * 3600 + 32 * 60, end: 11 * 3600 + 33 * 60 },
-    { key: 'sitHr', label: '座位', start: 11 * 3600 + 34 * 60, end: 11 * 3600 + 35 * 60 },
-    { key: 'supineHr', label: '臥位', start: 11 * 3600 + 36 * 60, end: 11 * 3600 + 40 * 60 },
+    { key: 'standHr', canvasId: 'standHistogramCanvas', label: '立位', timeLabel: '11:32〜11:33', start: 11 * 3600 + 32 * 60, end: 11 * 3600 + 33 * 60 },
+    { key: 'sitHr', canvasId: 'sitHistogramCanvas', label: '座位', timeLabel: '11:34〜11:35', start: 11 * 3600 + 34 * 60, end: 11 * 3600 + 35 * 60 },
+    { key: 'supineHr', canvasId: 'supineHistogramCanvas', label: '臥位', timeLabel: '11:36〜11:40', start: 11 * 3600 + 36 * 60, end: 11 * 3600 + 40 * 60 },
   ],
 };
 
@@ -597,6 +598,26 @@ function roundedRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
+function drawReferenceLine(ctx, box, axis, value, label) {
+  if (!Number.isFinite(value) || value < axis.min || value > axis.max) return;
+  const y = box.bottom - ((value - axis.min) / (axis.max - axis.min)) * box.height;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(96, 165, 250, 0.70)';
+  ctx.lineWidth = 1.8;
+  ctx.setLineDash([6, 6]);
+  ctx.beginPath();
+  ctx.moveTo(box.left, y);
+  ctx.lineTo(box.right, y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(96, 165, 250, 0.95)';
+  ctx.font = chartFont(900, 12);
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(label, box.right - 8, y - 5);
+  ctx.restore();
+}
+
 function drawTimeSeries(canvasId, metric, options) {
   const canvas = el(canvasId);
   const { ctx, w, h } = getCanvasContext(canvas);
@@ -611,18 +632,174 @@ function drawTimeSeries(canvasId, metric, options) {
   const values = selectedSeries.concat(classSeries).map((p) => p.value);
   const axis = getYAxis(values, options.fallbackAxis, 5);
   drawGrid(ctx, box, axis, options.yLabel, options.digits);
+  if (options.referenceValue !== undefined && options.referenceLabel) {
+    drawReferenceLine(ctx, box, axis, options.referenceValue, options.referenceLabel);
+  }
   drawLine(ctx, classSeries, box, axis, COLORS.classLine, 3, true, 0.95);
   drawLine(ctx, selectedSeries, box, axis, COLORS.orange, 3.2, false, 1);
   drawHover(ctx, box, axis, selectedSeries, classSeries, { ...options, canvasId });
 }
 
-function updateSummary() {
-  const rows = getTargetRows().filter((r) => r.sensorId === state.selectedId && Number.isFinite(r.hr));
-  CONFIG.summaryWindows.forEach((period) => {
-    const values = rows
-      .filter((r) => r.secondOfDay >= period.start && r.secondOfDay < period.end)
-      .map((r) => r.hr);
-    el(period.key).textContent = values.length ? `${fmtNumber(mean(values), 1)} bpm` : '-';
+function buildPeriodHrDistribution(period) {
+  const targetRows = getTargetRows().filter((r) =>
+    r.secondOfDay >= period.start &&
+    r.secondOfDay < period.end &&
+    Number.isFinite(r.hr)
+  );
+  const byId = new Map();
+  targetRows.forEach((r) => {
+    if (!byId.has(r.sensorId)) byId.set(r.sensorId, []);
+    byId.get(r.sensorId).push(r.hr);
+  });
+  return [...byId.entries()]
+    .map(([id, values]) => ({ id, value: mean(values), n: values.length }))
+    .filter((d) => Number.isFinite(d.value))
+    .sort((a, b) => a.value - b.value || a.id.localeCompare(b.id, 'ja'));
+}
+
+function buildHistogramData(distribution, xMin, xMax, binWidth) {
+  const bins = [];
+  for (let start = xMin; start < xMax - 1e-9; start += binWidth) {
+    bins.push({ start, end: start + binWidth, count: 0 });
+  }
+  distribution.forEach((d) => {
+    if (d.value < xMin || d.value > xMax) return;
+    let idx = Math.floor((d.value - xMin) / binWidth);
+    if (idx >= bins.length) idx = bins.length - 1;
+    if (idx >= 0) bins[idx].count += 1;
+  });
+  return bins;
+}
+
+function computeSharedHistogramAxis(distributions) {
+  const values = distributions.flatMap((d) => d.map((x) => x.value)).filter(Number.isFinite);
+  const binWidth = CONFIG.histogramBinWidth;
+  if (!values.length) {
+    return { xMin: 40, xMax: 120, binWidth, yMax: 5, yStep: 1 };
+  }
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  let xMin = Math.floor((minValue - binWidth) / binWidth) * binWidth;
+  let xMax = Math.ceil((maxValue + binWidth) / binWidth) * binWidth;
+  if (xMax - xMin < 20) {
+    const mid = (xMin + xMax) / 2;
+    xMin = Math.floor((mid - 10) / binWidth) * binWidth;
+    xMax = Math.ceil((mid + 10) / binWidth) * binWidth;
+  }
+  const allBins = distributions.map((dist) => buildHistogramData(dist, xMin, xMax, binWidth));
+  const maxCount = Math.max(1, ...allBins.flatMap((bins) => bins.map((b) => b.count)));
+  const yStep = Math.max(1, niceTickStep(maxCount, 4));
+  const yMax = Math.max(yStep, Math.ceil(maxCount / yStep) * yStep);
+  return { xMin, xMax, binWidth, yMax, yStep };
+}
+
+function drawHistogramCanvas(period, distribution, axis) {
+  const canvas = el(period.canvasId);
+  const { ctx, w, h } = getCanvasContext(canvas);
+  if (!state.rows.length) return drawNoData(ctx, w, h, 'CSVを読み込んでいます。');
+  if (!distribution.length) return drawNoData(ctx, w, h, '対象時間帯に心拍データがありません。');
+
+  clearCanvas(ctx, w, h);
+  const box = chartBox(w, h, 64, 38, 24, 58);
+  const bins = buildHistogramData(distribution, axis.xMin, axis.xMax, axis.binWidth);
+  const yRange = Math.max(1, axis.yMax);
+
+  ctx.save();
+  ctx.strokeStyle = COLORS.grid;
+  ctx.lineWidth = 1.1;
+  ctx.fillStyle = COLORS.muted;
+  ctx.font = chartFont(700, 12);
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+
+  for (let v = 0; v <= axis.yMax + 1e-9; v += axis.yStep) {
+    const y = box.bottom - (v / yRange) * box.height;
+    ctx.beginPath();
+    ctx.moveTo(box.left, y);
+    ctx.lineTo(box.right, y);
+    ctx.stroke();
+    ctx.fillText(fmtNumber(v, 0), box.left - 10, y);
+  }
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  const xTickStep = Math.max(axis.binWidth * 2, niceTickStep(axis.xMax - axis.xMin, 5));
+  for (let xTick = Math.ceil(axis.xMin / xTickStep) * xTickStep; xTick <= axis.xMax + 1e-9; xTick += xTickStep) {
+    const x = box.left + ((xTick - axis.xMin) / (axis.xMax - axis.xMin)) * box.width;
+    ctx.beginPath();
+    ctx.moveTo(x, box.top);
+    ctx.lineTo(x, box.bottom);
+    ctx.stroke();
+    ctx.fillText(fmtNumber(xTick, 0), x, box.bottom + 10);
+  }
+
+  ctx.strokeStyle = COLORS.axis;
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(box.left, box.bottom);
+  ctx.lineTo(box.right, box.bottom);
+  ctx.moveTo(box.left, box.top);
+  ctx.lineTo(box.left, box.bottom);
+  ctx.stroke();
+
+  bins.forEach((bin) => {
+    const x0 = box.left + ((bin.start - axis.xMin) / (axis.xMax - axis.xMin)) * box.width;
+    const x1 = box.left + ((bin.end - axis.xMin) / (axis.xMax - axis.xMin)) * box.width;
+    const y = box.bottom - (bin.count / yRange) * box.height;
+    const bw = Math.max(1, x1 - x0 - 3);
+    const bh = Math.max(0, box.bottom - y);
+    ctx.fillStyle = 'rgba(229, 237, 247, 0.72)';
+    ctx.fillRect(x0 + 1.5, y, bw, bh);
+  });
+
+  const selected = distribution.find((d) => d.id === state.selectedId);
+  if (selected && Number.isFinite(selected.value)) {
+    const x = box.left + ((selected.value - axis.xMin) / (axis.xMax - axis.xMin)) * box.width;
+    ctx.strokeStyle = COLORS.orange;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x, box.top);
+    ctx.lineTo(x, box.bottom);
+    ctx.stroke();
+
+    const label = `${state.selectedId}: ${fmtNumber(selected.value, 1)} bpm`;
+    ctx.font = chartFont(900, 13);
+    const labelW = ctx.measureText(label).width + 18;
+    const labelX = Math.min(box.right - labelW, Math.max(box.left, x + 8));
+    const labelY = box.top + 8;
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+    roundedRect(ctx, labelX, labelY, labelW, 27, 10);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(251, 146, 60, 0.65)';
+    ctx.stroke();
+    ctx.fillStyle = COLORS.orange;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, labelX + 9, labelY + 13.5);
+  }
+
+  ctx.fillStyle = COLORS.ink;
+  ctx.font = chartFont(900, 15);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(`${period.label} ${period.timeLabel}`, box.left, box.top - 13);
+  ctx.fillStyle = COLORS.muted;
+  ctx.font = chartFont(800, 12);
+  ctx.textAlign = 'center';
+  ctx.fillText('平均心拍数（bpm）', box.left + box.width / 2, box.bottom + 42);
+  ctx.save();
+  ctx.translate(box.left - 44, box.top + box.height / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('人数', 0, 0);
+  ctx.restore();
+  ctx.restore();
+}
+
+function updateSummaryHistograms() {
+  const distributions = CONFIG.summaryWindows.map(buildPeriodHrDistribution);
+  const axis = computeSharedHistogramAxis(distributions);
+  CONFIG.summaryWindows.forEach((period, i) => {
+    drawHistogramCanvas(period, distributions[i], axis);
   });
 }
 
@@ -638,8 +815,10 @@ function drawAll() {
     unit: '',
     digits: 3,
     fallbackAxis: { min: 0.8, max: 1.2, step: 0.1, minSpan: 0.05, pad: 0.02 },
+    referenceValue: 1.0,
+    referenceLabel: '1.000',
   });
-  updateSummary();
+  updateSummaryHistograms();
 }
 
 function setupEvents() {

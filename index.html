@@ -73,26 +73,25 @@
         <div class="section-title">
           <span>2</span>
           <div>
-            <h2>姿勢別の平均心拍数</h2>
-            <p>選択IDの心拍数を、指定時間帯ごとに集計します。</p>
+            <h2>姿勢別の平均心拍数分布</h2>
+            <p>各時間帯について、全IDの平均心拍数をヒストグラムで表示します。ビン幅と横軸範囲は3グラフで統一し、選択IDの値をオレンジの縦線で示します。</p>
           </div>
         </div>
 
-        <div class="summary-grid">
-          <article class="summary-card">
-            <span class="summary-label">立位</span>
-            <strong id="standHr">-</strong>
-            <small>11:32〜11:33</small>
+        <div class="histogram-legend">
+          <span><i class="hist-bar-sample"></i>全IDの分布</span>
+          <span><i class="hist-selected-line"></i>選択ID</span>
+        </div>
+
+        <div class="histogram-grid">
+          <article class="histogram-card">
+            <canvas id="standHistogramCanvas" width="760" height="330" aria-label="standing heart rate histogram"></canvas>
           </article>
-          <article class="summary-card">
-            <span class="summary-label">座位</span>
-            <strong id="sitHr">-</strong>
-            <small>11:34〜11:35</small>
+          <article class="histogram-card">
+            <canvas id="sitHistogramCanvas" width="760" height="330" aria-label="sitting heart rate histogram"></canvas>
           </article>
-          <article class="summary-card">
-            <span class="summary-label">臥位</span>
-            <strong id="supineHr">-</strong>
-            <small>11:36〜11:40</small>
+          <article class="histogram-card">
+            <canvas id="supineHistogramCanvas" width="760" height="330" aria-label="supine heart rate histogram"></canvas>
           </article>
         </div>
       </section>
