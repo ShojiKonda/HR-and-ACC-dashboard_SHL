@@ -15,6 +15,12 @@ const CONFIG = {
   displayStartSecond: 11 * 3600 + 20 * 60,
   displayEndSecond: 11 * 3600 + 45 * 60,
   histogramBinWidth: 5,
+  phaseWindows: [
+    { key: 'walkHr', label: '歩行', timeLabel: '11:24〜11:28', start: 11 * 3600 + 24 * 60, end: 11 * 3600 + 28 * 60 },
+    { key: 'standHr', label: '立位', timeLabel: '11:32〜11:33', start: 11 * 3600 + 32 * 60, end: 11 * 3600 + 33 * 60 },
+    { key: 'sitHr', label: '座位', timeLabel: '11:34〜11:35', start: 11 * 3600 + 34 * 60, end: 11 * 3600 + 35 * 60 },
+    { key: 'supineHr', label: '臥位', timeLabel: '11:36〜11:40', start: 11 * 3600 + 36 * 60, end: 11 * 3600 + 40 * 60 },
+  ],
   summaryWindows: [
     { key: 'standHr', canvasId: 'standHistogramCanvas', label: '立位', timeLabel: '11:32〜11:33', start: 11 * 3600 + 32 * 60, end: 11 * 3600 + 33 * 60 },
     { key: 'sitHr', canvasId: 'sitHistogramCanvas', label: '座位', timeLabel: '11:34〜11:35', start: 11 * 3600 + 34 * 60, end: 11 * 3600 + 35 * 60 },
@@ -640,6 +646,176 @@ function drawTimeSeries(canvasId, metric, options) {
   drawHover(ctx, box, axis, selectedSeries, classSeries, { ...options, canvasId });
 }
 
+
+function buildPhaseTrendProfiles() {
+  const targetRows = getTargetRows().filter((r) => Number.isFinite(r.hr));
+  const ids = [...new Set(targetRows.map((r) => r.sensorId))].sort((a, b) => a.localeCompare(b, 'ja'));
+  const profiles = ids.map((id) => {
+    const values = CONFIG.phaseWindows.map((period) => {
+      const periodValues = targetRows
+        .filter((r) => r.sensorId === id && r.secondOfDay >= period.start && r.secondOfDay < period.end)
+        .map((r) => r.hr)
+        .filter(Number.isFinite);
+      return mean(periodValues);
+    });
+    return { id, values };
+  }).filter((profile) => profile.values.some(Number.isFinite));
+
+  const meanValues = CONFIG.phaseWindows.map((_, index) => {
+    const values = profiles.map((profile) => profile.values[index]).filter(Number.isFinite);
+    return mean(values);
+  });
+
+  const selectedProfile = profiles.find((profile) => profile.id === state.selectedId) || null;
+  return { profiles, meanValues, selectedProfile };
+}
+
+function phasePointToCanvas(index, value, box, axis) {
+  const denom = Math.max(1, CONFIG.phaseWindows.length - 1);
+  const x = box.left + (index / denom) * box.width;
+  const y = box.bottom - ((value - axis.min) / (axis.max - axis.min)) * box.height;
+  return { x, y };
+}
+
+function drawCategoricalLine(ctx, values, box, axis, color, width = 2, dashed = false, alpha = 1, pointRadius = 3) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = width;
+  ctx.globalAlpha = alpha;
+  ctx.setLineDash(dashed ? [9, 7] : []);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  ctx.beginPath();
+  let started = false;
+  values.forEach((value, index) => {
+    if (!Number.isFinite(value)) {
+      started = false;
+      return;
+    }
+    const { x, y } = phasePointToCanvas(index, value, box, axis);
+    if (!started) {
+      ctx.moveTo(x, y);
+      started = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  values.forEach((value, index) => {
+    if (!Number.isFinite(value)) return;
+    const { x, y } = phasePointToCanvas(index, value, box, axis);
+    ctx.beginPath();
+    ctx.arc(x, y, pointRadius, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
+}
+
+function drawPhaseTrend() {
+  const canvas = el('phaseTrendCanvas');
+  const { ctx, w, h } = getCanvasContext(canvas);
+  if (!state.rows.length) return drawNoData(ctx, w, h, 'CSVを読み込んでいます。');
+
+  const { profiles, meanValues, selectedProfile } = buildPhaseTrendProfiles();
+  if (!profiles.length) return drawNoData(ctx, w, h, '対象時間帯に心拍データがありません。');
+
+  clearCanvas(ctx, w, h);
+  const box = chartBox(w, h, 88, 34, 42, 92);
+  const values = profiles.flatMap((profile) => profile.values).concat(meanValues).filter(Number.isFinite);
+  const axis = getYAxis(values, { min: 40, max: 140, step: 20, minSpan: 20, pad: 5 }, 5);
+  const yRange = Math.max(1e-9, axis.max - axis.min);
+
+  ctx.save();
+  ctx.strokeStyle = COLORS.grid;
+  ctx.lineWidth = 1.2;
+  ctx.fillStyle = COLORS.muted;
+  ctx.font = chartFont(700, 15);
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+
+  for (let v = axis.min; v <= axis.max + 1e-9; v += axis.step) {
+    const y = box.bottom - ((v - axis.min) / yRange) * box.height;
+    ctx.beginPath();
+    ctx.moveTo(box.left, y);
+    ctx.lineTo(box.right, y);
+    ctx.stroke();
+    ctx.fillText(fmtNumber(v, 0), box.left - 12, y);
+  }
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  CONFIG.phaseWindows.forEach((period, index) => {
+    const { x } = phasePointToCanvas(index, axis.min, box, axis);
+    ctx.beginPath();
+    ctx.moveTo(x, box.top);
+    ctx.lineTo(x, box.bottom);
+    ctx.stroke();
+    ctx.fillStyle = COLORS.ink;
+    ctx.font = chartFont(900, 16);
+    ctx.fillText(period.label, x, box.bottom + 13);
+    ctx.fillStyle = COLORS.muted;
+    ctx.font = chartFont(800, 12);
+    ctx.fillText(period.timeLabel, x, box.bottom + 36);
+  });
+
+  ctx.strokeStyle = COLORS.axis;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(box.left, box.bottom);
+  ctx.lineTo(box.right, box.bottom);
+  ctx.moveTo(box.left, box.top);
+  ctx.lineTo(box.left, box.bottom);
+  ctx.stroke();
+
+  ctx.fillStyle = COLORS.ink;
+  ctx.font = chartFont(800, 16);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.save();
+  ctx.translate(box.left - 55, box.top + box.height / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('平均心拍数（bpm）', 0, 0);
+  ctx.restore();
+
+  profiles.forEach((profile) => {
+    if (profile.id === state.selectedId) return;
+    drawCategoricalLine(ctx, profile.values, box, axis, 'rgba(203, 213, 225, 0.28)', 1.4, false, 1, 2.2);
+  });
+
+  drawCategoricalLine(ctx, meanValues, box, axis, COLORS.classLine, 3.4, true, 1, 4.2);
+
+  if (selectedProfile) {
+    drawCategoricalLine(ctx, selectedProfile.values, box, axis, COLORS.orange, 3.8, false, 1, 5);
+  }
+
+  ctx.font = chartFont(900, 13);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  CONFIG.phaseWindows.forEach((_, index) => {
+    const meanValue = meanValues[index];
+    if (!Number.isFinite(meanValue)) return;
+    const { x, y } = phasePointToCanvas(index, meanValue, box, axis);
+    ctx.fillStyle = COLORS.classLine;
+    ctx.fillText(`平均 ${fmtNumber(meanValue, 1)}`, x, y - 9);
+  });
+
+  if (selectedProfile) {
+    ctx.textBaseline = 'top';
+    selectedProfile.values.forEach((value, index) => {
+      if (!Number.isFinite(value)) return;
+      const { x, y } = phasePointToCanvas(index, value, box, axis);
+      ctx.fillStyle = COLORS.orange;
+      ctx.fillText(fmtNumber(value, 1), x, y + 10);
+    });
+  }
+
+  ctx.restore();
+}
+
 function buildPeriodHrDistribution(period) {
   const targetRows = getTargetRows().filter((r) =>
     r.secondOfDay >= period.start &&
@@ -818,6 +994,7 @@ function drawAll() {
     referenceValue: 1.0,
     referenceLabel: '1.000',
   });
+  drawPhaseTrend();
   updateSummaryHistograms();
 }
 

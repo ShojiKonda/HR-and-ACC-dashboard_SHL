@@ -11,7 +11,7 @@
       <div class="hero-copy">
         <p class="eyebrow">HR ACC Dashboard SHL</p>
         <h1>安静時心拍数・加速度ノルム</h1>
-        <p class="lead">5月25日のデータを自動読込し、11:20〜11:45の心拍数と加速度ノルムをID別に表示します。各グラフには選択IDと全員平均を重ねて表示します。</p>
+        <p class="lead">5月25日のデータを自動読込し、11:20〜11:45の心拍数と加速度ノルムをID別に表示します。歩行から臥位までの平均心拍数変化も折れ線で表示します。</p>
       </div>
       <aside class="hero-card status-card" aria-live="polite">
         <strong><span id="statusDot" class="status-dot loading"></span><span id="loadStatusTitle">読み込み中</span></strong>
@@ -69,9 +69,29 @@
         </div>
       </section>
 
-      <section class="panel summary-panel" id="summary">
+      <section class="panel trend-panel" id="phase-trend">
         <div class="section-title">
           <span>2</span>
+          <div>
+            <h2>歩行から臥位までの平均心拍数変化</h2>
+            <p>歩行（11:24〜11:28）、立位（11:32〜11:33）、座位（11:34〜11:35）、臥位（11:36〜11:40）の各区間で平均心拍数を算出し、横軸に姿勢・活動条件、縦軸に平均心拍数を表示します。</p>
+          </div>
+        </div>
+
+        <div class="trend-legend">
+          <span><i class="trend-line all-line"></i>全ID</span>
+          <span><i class="trend-line selected-line"></i>選択ID</span>
+          <span><i class="trend-line mean-line"></i>全員平均</span>
+        </div>
+
+        <article class="chart-block">
+          <canvas id="phaseTrendCanvas" width="1180" height="430" aria-label="heart rate decline from walking to supine"></canvas>
+        </article>
+      </section>
+
+      <section class="panel summary-panel" id="summary">
+        <div class="section-title">
+          <span>3</span>
           <div>
             <h2>姿勢別の平均心拍数分布</h2>
             <p>各時間帯について、全IDの平均心拍数をヒストグラムで表示します。3つのグラフは横並びで表示し、ビン幅5 bpmと横軸範囲を統一します。選択IDの値はオレンジの縦線で示します。</p>
