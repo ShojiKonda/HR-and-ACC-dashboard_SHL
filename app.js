@@ -2487,7 +2487,7 @@ function renderCompareCharts() {
 
 
 
-// ===== Exercise intensity analysis: %HRmax vs %HRR using supine resting HR by matched ID =====
+// ===== Exercise intensity analysis: anonymous between-subject comparison =====
 const INTENSITY_HRMAX = 200;
 const RESTING_BASELINE_DATE = "2026-05-25";
 const RESTING_SUPINE_START = 11 * 3600 + 36 * 60;
@@ -2548,30 +2548,6 @@ function zoneSummaryFromPercentValues(values) {
   zones.forEach(z => { z.pct = total ? (z.count / total) * 100 : 0; });
   return { zones, total };
 }
-function mainZoneLabel(zones) {
-  const best = zones.filter(z => z.key !== "below").reduce((a, b) => (b.pct > (a?.pct ?? -1) ? b : a), null);
-  if (!best || best.pct <= 0) {
-    const below = zones.find(z => z.key === "below");
-    return below && below.pct > 0 ? "Below" : "-";
-  }
-  return `Zone ${best.level}`;
-}
-function intensityMethodMetrics(method, m, baselineHr) {
-  const values = intensityPercentValues(method, m, baselineHr);
-  const { zones, total } = zoneSummaryFromPercentValues(values);
-  const moderatePct = zones.filter(z => z.key !== "below").reduce((sum, z) => sum + z.pct, 0);
-  const highPct = zones.filter(z => z.key === "z4" || z.key === "z5").reduce((sum, z) => sum + z.pct, 0);
-  return {
-    values,
-    zones,
-    total,
-    avg: mean(values),
-    max: safeMax(values, NaN),
-    mainZone: mainZoneLabel(zones),
-    moderatePct,
-    highPct
-  };
-}
 function averageIntensityZonePercentages(method, date) {
   const baselineMap = restingBaselineMap();
   const sums = INTENSITY_ZONE_DEFS.map(z => ({ ...z, pct: 0, count: 0 }));
@@ -2608,7 +2584,7 @@ function renderIntensityBaselinePanel() {
   const hrr = INTENSITY_HRMAX - baselineHr;
   const hrs = exerciseHrValuesForMeasurement(m);
   grid.innerHTML = [
-    intensityMetricCard("選択ID", m.sensor, ""),
+    intensityMetricCard("選択対象", "選択ID", ""),
     intensityMetricCard("臥位時基準心拍数", formatBpm(baselineHr, 1), ""),
     intensityMetricCard("HRmax", `${INTENSITY_HRMAX}`, "bpm固定"),
     intensityMetricCard("心拍予備能 HRR", Number.isFinite(hrr) ? hrr.toFixed(1) : "-", "bpm"),
@@ -2616,37 +2592,173 @@ function renderIntensityBaselinePanel() {
     intensityMetricCard("運動時最大心拍数", formatBpm(safeMax(hrs, NaN), 0), "")
   ].join("");
 }
-function methodCompareCard(title, subtitle, metrics, disabled = false) {
-  if (disabled || !metrics || !metrics.total) {
-    return `<article class="method-card disabled"><h3>${title}</h3><p class="method-subtitle">${subtitle}</p><div class="empty">臥位時基準心拍数がないため計算できません。</div></article>`;
+function pairedIntensityRecords(date) {
+  const baselineMap = restingBaselineMap();
+  const records = [];
+  for (const m of state.measurements.filter(item => item.date === date)) {
+    const baselineHr = baselineMap.get(m.sensor);
+    if (!Number.isFinite(baselineHr)) continue;
+    const hrmaxValues = intensityPercentValues("hrmax", m, baselineHr);
+    const hrrValues = intensityPercentValues("hrr", m, baselineHr);
+    if (!hrmaxValues.length || !hrrValues.length) continue;
+    const hrs = exerciseHrValuesForMeasurement(m);
+    records.push({
+      id: m.sensor,
+      baselineHr,
+      avgHr: mean(hrs),
+      maxHr: safeMax(hrs, NaN),
+      avgHrmax: mean(hrmaxValues),
+      avgHrr: mean(hrrValues),
+      maxHrmax: safeMax(hrmaxValues, NaN),
+      maxHrr: safeMax(hrrValues, NaN),
+      hrmaxValues,
+      hrrValues
+    });
   }
-  return `
-    <article class="method-card">
-      <h3>${title}</h3>
-      <p class="method-subtitle">${subtitle}</p>
-      <div class="method-metrics">
-        <div><span>平均強度</span><strong>${formatPct(metrics.avg)}</strong></div>
-        <div><span>最大強度</span><strong>${formatPct(metrics.max)}</strong></div>
-        <div><span>主ゾーン</span><strong>${metrics.mainZone}</strong></div>
-        <div><span>50%以上</span><strong>${formatPct(metrics.moderatePct)}</strong></div>
-        <div><span>Zone 4+5</span><strong>${formatPct(metrics.highPct)}</strong></div>
-      </div>
-    </article>`;
+  const hrmaxSorted = records.slice().sort((a, b) => b.avgHrmax - a.avgHrmax || naturalCompare(a.id, b.id));
+  const hrrSorted = records.slice().sort((a, b) => b.avgHrr - a.avgHrr || naturalCompare(a.id, b.id));
+  const hrmaxRank = new Map();
+  const hrrRank = new Map();
+  hrmaxSorted.forEach((r, i) => hrmaxRank.set(r.id, i + 1));
+  hrrSorted.forEach((r, i) => hrrRank.set(r.id, i + 1));
+  records.forEach(r => {
+    r.hrmaxRank = hrmaxRank.get(r.id);
+    r.hrrRank = hrrRank.get(r.id);
+    r.rankChange = r.hrmaxRank - r.hrrRank;
+  });
+  return { records, hrmaxSorted, hrrSorted };
 }
-function renderIntensityMethodComparison() {
-  const target = $("intensityMethodCompareGrid");
-  if (!target) return;
+function renderIntensityRankSummary() {
+  const target = $("intensityRankSummary");
+  if (!target) return null;
   const m = selectedMeasurement();
-  if (!m) {
-    target.innerHTML = '<div class="empty">選択条件に一致する運動時データがありません。</div>';
+  const date = state.selectedDate;
+  const ranking = pairedIntensityRecords(date);
+  const selected = m ? ranking.records.find(r => r.id === m.sensor) : null;
+  if (!ranking.records.length) {
+    target.innerHTML = '<div class="empty">臥位時基準心拍数と運動時心拍数の両方があるIDがありません。</div>';
+    return ranking;
+  }
+  if (!selected) {
+    target.innerHTML = `
+      ${intensityMetricCard("対応ID数", String(ranking.records.length), "名")}
+      ${intensityMetricCard("選択ID", "対応なし", "")}
+      ${intensityMetricCard("平均%HRmax", "-", "")}
+      ${intensityMetricCard("平均%HRR", "-", "")}
+      ${intensityMetricCard("順位変化", "-", "")}`;
+    return ranking;
+  }
+  const deltaText = selected.rankChange > 0 ? `+${selected.rankChange}` : String(selected.rankChange);
+  target.innerHTML = `
+    ${intensityMetricCard("対応ID数", String(ranking.records.length), "名")}
+    ${intensityMetricCard("平均%HRmax", formatPct(selected.avgHrmax), "")}
+    ${intensityMetricCard("平均%HRR", formatPct(selected.avgHrr), "")}
+    ${intensityMetricCard("%HRmax順位", `${selected.hrmaxRank} / ${ranking.records.length}`, "")}
+    ${intensityMetricCard("%HRR順位", `${selected.hrrRank} / ${ranking.records.length}`, "")}
+    ${intensityMetricCard("順位変化", deltaText, "")}`;
+  return ranking;
+}
+function drawIntensityPairedRanking(ranking) {
+  const canvas = $("intensityPairedRankCanvas");
+  if (!canvas) return;
+  const { ctx, width, height } = canvasContext(canvas);
+  if (width < 320 || height < 160) return;
+  const m = selectedMeasurement();
+  if (!ranking || !ranking.records.length) {
+    title(ctx, "%HRmax法と%HRR法の匿名対応比較", "対応する臥位時基準心拍数があるIDがありません。");
     return;
   }
-  const baselineHr = restingBaselineForSensor(m.sensor);
-  const hrmaxMetrics = intensityMethodMetrics("hrmax", m, baselineHr);
-  const hrrMetrics = intensityMethodMetrics("hrr", m, baselineHr);
-  target.innerHTML = `
-    ${methodCompareCard("%HRmax法", "安静時心拍数を考慮しない", hrmaxMetrics, false)}
-    ${methodCompareCard("%HRR法", "臥位時基準心拍数を考慮", hrrMetrics, !Number.isFinite(baselineHr))}`;
+  const n = ranking.records.length;
+  const leftX = Math.max(210, width * 0.31);
+  const rightX = Math.min(width - 210, width * 0.69);
+  const top = 94;
+  const bottom = height - 62;
+  const step = n > 1 ? (bottom - top) / (n - 1) : 1;
+  const yFromRank = rank => top + (rank - 1) * step;
+  const selectedId = m?.sensor;
+
+  title(ctx, "%HRmax法と%HRR法の匿名対応比較", "");
+  ctx.save();
+  ctx.font = fnt(950, 18);
+  ctx.textAlign = "center";
+  ctx.fillStyle = WHITE;
+  ctx.fillText("%HRmax法", leftX, 62);
+  ctx.fillText("%HRR法", rightX, 62);
+  ctx.font = fnt(800, 12);
+  ctx.fillStyle = MUTED;
+  ctx.fillText("平均%HRmaxで降順", leftX, 82);
+  ctx.fillText("平均%HRRで降順", rightX, 82);
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,.18)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(leftX, top - 18);
+  ctx.lineTo(leftX, bottom + 18);
+  ctx.moveTo(rightX, top - 18);
+  ctx.lineTo(rightX, bottom + 18);
+  ctx.stroke();
+  ctx.font = fnt(800, 11);
+  ctx.fillStyle = MUTED;
+  ctx.textAlign = "center";
+  for (let i = 1; i <= n; i++) {
+    if (i === 1 || i === n || i % 5 === 0) {
+      const y = yFromRank(i);
+      ctx.fillText(String(i), leftX - 64, y);
+      ctx.fillText(String(i), rightX + 64, y);
+    }
+  }
+  ctx.restore();
+
+  function drawRecord(record, selected = false) {
+    const yL = yFromRank(record.hrmaxRank);
+    const yR = yFromRank(record.hrrRank);
+    const color = selected ? C.orange : "rgba(207, 216, 220, .62)";
+    const pointFill = selected ? C.orange : "rgba(207, 216, 220, .78)";
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = selected ? 1 : 0.58;
+    ctx.lineWidth = selected ? 4.2 : 1.55;
+    ctx.beginPath();
+    ctx.moveTo(leftX, yL);
+    ctx.lineTo(rightX, yR);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = pointFill;
+    ctx.strokeStyle = selected ? WHITE : "rgba(255,255,255,.22)";
+    ctx.lineWidth = selected ? 2.5 : 1;
+    [[leftX, yL], [rightX, yR]].forEach(([x, y]) => {
+      ctx.beginPath();
+      ctx.arc(x, y, selected ? 6.5 : 4.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+    ctx.font = fnt(selected ? 950 : 800, selected ? 13 : 11);
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = selected ? WHITE : "rgba(232,238,247,.76)";
+    ctx.textAlign = "right";
+    ctx.fillText(formatPct(record.avgHrmax), leftX - 13, yL);
+    ctx.textAlign = "left";
+    ctx.fillText(formatPct(record.avgHrr), rightX + 13, yR);
+    if (selected) {
+      ctx.font = fnt(950, 13);
+      ctx.fillStyle = C.orange;
+      ctx.textAlign = "right";
+      ctx.fillText("選択ID", leftX - 13, yL - 18);
+      ctx.textAlign = "left";
+      ctx.fillText("選択ID", rightX + 13, yR - 18);
+    }
+    ctx.restore();
+  }
+
+  ranking.records.filter(r => r.id !== selectedId).forEach(r => drawRecord(r, false));
+  const selected = ranking.records.find(r => r.id === selectedId);
+  if (selected) drawRecord(selected, true);
+}
+function renderIntensityRankComparison() {
+  const ranking = renderIntensityRankSummary();
+  drawIntensityPairedRanking(ranking);
 }
 function renderIntensityZoneRows(selectedZones, averageZones) {
   const averageMap = new Map((averageZones || []).map(z => [z.key, z.pct]));
@@ -2693,131 +2805,10 @@ function renderIntensityZoneComparison() {
     ${renderIntensityZoneBlock("%HRmax法", "安静時心拍数を考慮しない", hrmaxSelected, hrmaxAverage)}
     ${Number.isFinite(baselineHr) ? renderIntensityZoneBlock("%HRR法", "臥位時基準心拍数を考慮", hrrSelected, hrrAverage) : `<article class="intensity-zone-card"><h3>%HRR法</h3><p>臥位時基準心拍数を考慮</p><div class="empty">臥位時基準心拍数がないため計算できません。</div></article>`}`;
 }
-function buildReclassificationMatrix(m, baselineHr) {
-  const matrix = Array.from({ length: INTENSITY_ZONE_DEFS.length }, () => Array(INTENSITY_ZONE_DEFS.length).fill(0));
-  const hrs = exerciseHrValuesForMeasurement(m);
-  const hrr = INTENSITY_HRMAX - baselineHr;
-  if (!m || !Number.isFinite(baselineHr) || !Number.isFinite(hrr) || hrr <= 0) return { matrix, total: 0, same: 0, higher: 0, lower: 0 };
-  for (const hr of hrs) {
-    const pMax = (hr / INTENSITY_HRMAX) * 100;
-    const pHrr = Math.max(0, ((hr - baselineHr) / hrr) * 100);
-    const r = INTENSITY_ZONE_DEFS.findIndex(z => classifyIntensityZone(pMax).key === z.key);
-    const c = INTENSITY_ZONE_DEFS.findIndex(z => classifyIntensityZone(pHrr).key === z.key);
-    if (r >= 0 && c >= 0) matrix[r][c] += 1;
-  }
-  const total = matrix.flat().reduce((sum, v) => sum + v, 0);
-  let same = 0, higher = 0, lower = 0;
-  matrix.forEach((row, r) => row.forEach((count, c) => {
-    if (c === r) same += count;
-    else if (c > r) higher += count;
-    else lower += count;
-  }));
-  return { matrix, total, same, higher, lower };
-}
-function renderIntensityMatrixSummary() {
-  const target = $("intensityMatrixSummary");
-  if (!target) return null;
-  const m = selectedMeasurement();
-  const baselineHr = m ? restingBaselineForSensor(m.sensor) : NaN;
-  const result = buildReclassificationMatrix(m, baselineHr);
-  if (!m || !result.total) {
-    target.innerHTML = '<div class="empty">ゾーン再分類を計算できません。</div>';
-    return result;
-  }
-  target.innerHTML = `
-    <article class="matrix-summary-card"><span>一致率</span><strong>${formatPct((result.same / result.total) * 100)}</strong></article>
-    <article class="matrix-summary-card"><span>HRR法で高いゾーン</span><strong>${formatPct((result.higher / result.total) * 100)}</strong></article>
-    <article class="matrix-summary-card"><span>HRR法で低いゾーン</span><strong>${formatPct((result.lower / result.total) * 100)}</strong></article>`;
-  return result;
-}
-function drawIntensityMatrix(result) {
-  const canvas = $("intensityReclassificationCanvas");
-  if (!canvas) return;
-  const { ctx, width, height } = canvasContext(canvas);
-  if (width < 320 || height < 160) return;
-  if (!result || !result.total) {
-    title(ctx, "ゾーン再分類マトリクス", "臥位時基準心拍数がない、または表示範囲内に心拍データがありません。");
-    return;
-  }
-  const labels = INTENSITY_ZONE_DEFS.map(z => z.key === "below" ? "Below" : `Z${z.level}`);
-  const n = labels.length;
-  const left = 132;
-  const top = 90;
-  const right = width - 38;
-  const bottom = height - 70;
-  const cell = Math.min((right - left) / n, (bottom - top) / n);
-  const gridW = cell * n;
-  const gridH = cell * n;
-  const x0 = left + ((right - left) - gridW) / 2;
-  const y0 = top;
-
-  ctx.save();
-  ctx.fillStyle = WHITE;
-  ctx.font = fnt(950, 18);
-  ctx.textAlign = "left";
-  ctx.fillText("%HRmax法 → %HRR法", 24, 30);
-  ctx.fillStyle = MUTED;
-  ctx.font = fnt(800, 12);
-  ctx.fillText("各セルは表示範囲内時間の割合を示します。", 24, 54);
-
-  ctx.font = fnt(900, 12);
-  ctx.textAlign = "center";
-  labels.forEach((label, i) => {
-    ctx.fillStyle = INK;
-    ctx.fillText(label, x0 + i * cell + cell / 2, y0 - 20);
-  });
-  ctx.save();
-  ctx.translate(x0 + gridW / 2, y0 - 52);
-  ctx.fillStyle = MUTED;
-  ctx.font = fnt(900, 13);
-  ctx.fillText("%HRR法", 0, 0);
-  ctx.restore();
-
-  labels.forEach((label, i) => {
-    ctx.fillStyle = INK;
-    ctx.textAlign = "right";
-    ctx.fillText(label, x0 - 16, y0 + i * cell + cell / 2);
-  });
-  ctx.save();
-  ctx.translate(28, y0 + gridH / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.fillStyle = MUTED;
-  ctx.font = fnt(900, 13);
-  ctx.textAlign = "center";
-  ctx.fillText("%HRmax法", 0, 0);
-  ctx.restore();
-
-  const maxPct = Math.max(1, ...result.matrix.flat().map(v => (v / result.total) * 100));
-  for (let r = 0; r < n; r++) {
-    for (let c = 0; c < n; c++) {
-      const pct = (result.matrix[r][c] / result.total) * 100;
-      const x = x0 + c * cell;
-      const y = y0 + r * cell;
-      const alpha = Math.max(0.08, Math.min(0.95, pct / maxPct));
-      let fill = `rgba(96, 165, 250, ${0.18 + alpha * 0.44})`;
-      if (c > r) fill = `rgba(248, 113, 113, ${0.16 + alpha * 0.48})`;
-      if (c < r) fill = `rgba(34, 211, 238, ${0.14 + alpha * 0.42})`;
-      ctx.fillStyle = fill;
-      ctx.fillRect(x + 2, y + 2, cell - 4, cell - 4);
-      ctx.strokeStyle = "rgba(255,255,255,.16)";
-      ctx.strokeRect(x + 2, y + 2, cell - 4, cell - 4);
-      if (pct >= 0.05) {
-        ctx.fillStyle = WHITE;
-        ctx.font = fnt(900, cell < 70 ? 11 : 13);
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(`${pct.toFixed(1)}%`, x + cell / 2, y + cell / 2);
-      }
-    }
-  }
-  ctx.restore();
-}
 function renderIntensityAnalysis() {
   renderIntensityBaselinePanel();
-  renderIntensityMethodComparison();
+  renderIntensityRankComparison();
   renderIntensityZoneComparison();
-  const matrixResult = renderIntensityMatrixSummary();
-  drawIntensityMatrix(matrixResult);
 }
 
 function updateAll() {

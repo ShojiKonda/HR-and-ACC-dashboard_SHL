@@ -1037,3 +1037,51 @@ canvas,
   width: 60px;
   font-size: 15px;
 }
+
+/* 2026-06: revised exercise intensity analysis with anonymous paired ranking. */
+.rank-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(130px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.rank-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin: 2px 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+.rank-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.rank-line-sample {
+  display: inline-block;
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+}
+.rank-line-sample.all {
+  background: rgba(207,216,220,.62);
+}
+.rank-line-sample.selected {
+  background: var(--orange);
+  box-shadow: 0 0 12px rgba(251,146,60,.45);
+}
+.ranking-chart canvas {
+  min-height: 660px;
+}
+@media (max-width: 1180px) {
+  .rank-summary-grid { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
+}
+@media (max-width: 760px) {
+  .rank-summary-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+  .ranking-chart canvas { min-height: 560px; }
+}
+@media (max-width: 520px) {
+  .rank-summary-grid { grid-template-columns: 1fr; }
+}
